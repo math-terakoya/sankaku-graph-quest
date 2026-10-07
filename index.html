@@ -203,6 +203,8 @@ padding: 8px 18px; font-size: 13px; letter-spacing: 2px; cursor: pointer; margin
 .chap .unit { display: block; font-size: 11px; color: #aaa; margin-top: 2px; }
 .chap.locked { color: #666; border-color: #444; cursor: default; }
 .chap.reset { border-color: #888; color: #ccc; margin-top: 8px; }
+.chap .stars { float: right; color: #ffd84a; letter-spacing: 1px; }
+.chap .stars .dim { color: #444; }
 .how-btn.hidden { display: none; }
 #problem .expr.exam { font-size: 14px; text-align: left; line-height: 1.6; }
 .level-up.crit { color: #ff9900; font-size: 26px; text-shadow: 3px 3px 0 #662200, 0 0 18px #ff6600; }
@@ -275,14 +277,14 @@ letter-spacing: 4px; z-index: 20; animation: lvUp 1.8s forwards; pointer-events:
     <h1 id="clearTitle">たおした！</h1>
     <p id="clearText" style="white-space:pre-line;"></p>
     <button class="start-btn" id="clearBtn">▶ しょうえらびへ</button>
-    <button class="how-btn hidden" id="resetBtn1">▶ さいしょから あそぶ</button>
+    <button class="how-btn hidden" id="resetBtn1">▶ 1周目の LV 1 に もどって あそぶ</button>
   </div>
 
   <div class="overlay hidden" id="resetScreen">
     <div class="hero">🔄</div>
-    <h1 style="font-size:20px;">さいしょから？</h1>
-    <p>クリアの きろくと LV を けして<br>さいしょから あそびます。</p>
-    <button class="start-btn" id="resetYes">けす</button>
+    <h1 style="font-size:20px;">1周目の LV 1 に もどる？</h1>
+    <p>★ と LV は 1周目から に なります。</p>
+    <button class="start-btn" id="resetYes">もどる</button>
     <button class="how-btn" id="resetNo">やめる</button>
   </div>
 
@@ -702,13 +704,31 @@ const state = {
 const chap = () => C.CHAPTERS[state.ch - 1];
 const atBoss = () => state.stage === 'boss';
 // ゆうしゃ LV ＝ 1 ＋ クリアした 章（さいごの 章を のぞく）の 数
-const heroLV = () => 1 + [1, 2, 3, 4, 5].filter(k => loadClear()[k]).length;
-let memClear = {};
-function loadClear() { try { return JSON.parse(localStorage.getItem('graph-clear') || '{}'); } catch (e) { return memClear; } }
-function saveClear(ch) {
-  const cl = loadClear(); cl[ch] = true; memClear = cl;
-  try { localStorage.setItem('graph-clear', JSON.stringify(cl)); } catch (e) { /* 保存できなくても その回は遊べる */ }
+// ---------- 周回の きろく ----------
+// lap：何周目か（6 で 👑 マスター）、cur：この周で クリアした 章、gained：LV が 上がった 回数、stars：章ごとの ★（クリアした 周の 数）
+// LV が 上がるのは「その周で はじめて クリアした 章」だけ。同じ周で 同じ章を くりかえしても 上がらない（均等に あそぶ）
+const MAX_LAP = 5;
+let memProg = null;
+function newProg() { return { lap: 1, cur: {}, gained: 0, stars: {} }; }
+function loadProg() {
+  try {
+    const raw = localStorage.getItem('graph-progress');
+    if (raw) return JSON.parse(raw);
+    const old = JSON.parse(localStorage.getItem('graph-clear') || 'null');   // 前の版の きろくを ひきつぐ
+    if (old) {
+      const pr = newProg();
+      [1, 2, 3, 4, 5].forEach(k => { if (old[k]) { pr.cur[k] = true; pr.gained++; pr.stars[k] = 1; } });
+      if (old[6]) { pr.stars[6] = 1; pr.lap = 2; pr.cur = {}; }
+      return pr;
+    }
+  } catch (e) { /* 読めなければ メモリの きろく */ }
+  return memProg || newProg();
 }
+function saveProg(pr) { memProg = pr; try { localStorage.setItem('graph-progress', JSON.stringify(pr)); } catch (e) { /* 保存できなくても その回は遊べる */ } }
+const heroLV = () => 1 + loadProg().gained;
+const attack = L => L + 1;   // こうげき力 ＝ ザコの 問題の きほんダメージ（2 ＋ LV − 1）
+const isMaster = pr => pr.lap > MAX_LAP;
+const finalOpen = pr => isMaster(pr) || [1, 2, 3, 4, 5].every(k => pr.cur[k]);
 const p = () => state.problem;
 const tapMode = q => !!q && !q.options;
 
@@ -723,7 +743,7 @@ function mathHTML(text, stacked) {
 // ---------- 表示 ----------
 function renderStatus() {
   const c = chap(), n = c.final ? 0 : C.NORMAL;
-  $('levelDisplay').textContent = 'LV ' + heroLV();
+  $('levelDisplay').textContent = 'LV ' + heroLV() + '　こうげき ' + attack(heroLV());
   $('livesDisplay').innerHTML = '♥'.repeat(Math.max(0, state.lives)) + '<span class="empty">' + '♡'.repeat(MAX_LIVES - Math.max(0, state.lives)) + '</span>';
   $('progressDisplay').textContent = c.final ? 'さいご' : '第' + c.ch + '章';
   $('enemyHpDisplay').textContent = 'HP ' + Math.max(0, state.hp) + '/' + state.maxHp;
@@ -1045,36 +1065,52 @@ function afterDefeat() {
   chapterClear();
 }
 function chapterClear() {
-  const c = chap(), before = heroLV(), first = !loadClear()[c.ch];
-  saveClear(c.ch);
+  const c = chap(), pr = loadProg(), before = heroLV();
   state.phase = 'idle';
-  const after = heroLV(), n = [1, 2, 3, 4, 5].filter(k => loadClear()[k]).length;
+  const lines = [];
+  if (!c.final) {
+    if (!isMaster(pr) && !pr.cur[c.ch]) {   // この 周で はじめて クリア → LV ＋1、★ ふえる
+      pr.cur[c.ch] = true; pr.gained += 1; pr.stars[c.ch] = pr.lap;
+      lines.push('LEVEL UP！　LV ' + before + ' → ' + (before + 1) + '　こうげき力 ' + attack(before) + ' → ' + attack(before + 1));
+      showLevelUp();
+    } else if (!isMaster(pr)) lines.push('（この 周では もう クリアずみ。ほかの 章を クリアすると LV が あがる）');
+    const n = [1, 2, 3, 4, 5].filter(k => pr.cur[k]).length;
+    lines.push(isMaster(pr) ? '👑 マスター' : pr.lap + '周目：クリアした 章 ' + n + '/5');
+    if (n === 5 && !isMaster(pr)) lines.push('さいごの 章が ひらいた！');
+  } else {
+    pr.stars[6] = Math.min(MAX_LAP, isMaster(pr) ? MAX_LAP : pr.lap);
+    const done = pr.lap;
+    if (!isMaster(pr)) { pr.lap += 1; pr.cur = {}; }
+    lines.push('GAME CLEAR!　' + Math.min(done, MAX_LAP) + '周目 クリア！');
+    lines.push(isMaster(pr) ? '👑 ★5 まで あつめた！ マスター！' : 'つぎは ' + pr.lap + '周目。5つの 章を もう いちど クリアしよう（LV も また あがる）');
+  }
+  saveProg(pr);
   $('clearHero').textContent = c.boss.sprite;
   $('clearTitle').textContent = c.boss.name + 'を たおした！';
-  let text = c.final ? 'GAME CLEAR!　なみを みきわめし者よ、その ちえに えいこう あれ。' : 'クリアした 章 ' + n + '/5';
-  if (!c.final && first && after > before) { text = 'LEVEL UP！　ゆうしゃ LV ' + before + ' → ' + after + '（こうげき力 ＋1）\n' + text; showLevelUp(); }
-  if (n === 5 && !c.final && first) text += '\nさいごの 章が ひらいた！';
-  $('clearText').textContent = text;
+  $('clearText').textContent = lines.join('\n');
   $('resetBtn1').classList.toggle('hidden', !c.final);
   $('clearScreen').classList.remove('hidden');
 }
+function starStr(n) { return '<span class="stars">' + '★'.repeat(n) + '<span class="dim">' + '☆'.repeat(MAX_LAP - n) + '</span></span>'; }
 function showMap() {
-  const cl = loadClear(), all5 = [1, 2, 3, 4, 5].every(k => cl[k]);
+  const pr = loadProg(), L = heroLV();
   const items = C.CHAPTERS.map(c => {
-    if (c.final && !all5) return '<button class="chap locked" disabled>🔒 さいごの 章（1〜5章を クリアで ひらく）</button>';
-    return '<button class="chap" data-ch="' + c.ch + '">' + (cl[c.ch] ? '✅ ' : '▶ ') + c.title + '<span class="unit">' +
+    const st = starStr(pr.stars[c.ch] || 0);
+    const doneNow = c.final ? false : (isMaster(pr) || !!pr.cur[c.ch]);
+    if (c.final && !finalOpen(pr)) return '<button class="chap locked" disabled>🔒 さいごの 章' + st + '<span class="unit">この 周で 1〜5章を クリアで ひらく</span></button>';
+    return '<button class="chap" data-ch="' + c.ch + '">' + (doneNow ? '✅ ' : '▶ ') + c.title + st + '<span class="unit">' +
       (c.final ? 'ボス ' + c.boss.name + '（問題集の ことばで 5つの 単元）' : 'ザコ 2体 → 中ボス ' + c.boss.name) + '</span></button>';
-  }).join('') + (cl[6] ? '<button class="chap reset" id="resetBtn2">🔄 さいしょから あそぶ<span class="unit">クリアの きろくと LV を けす</span></button>' : '');
-  $('mapLV').textContent = 'ゆうしゃ LV ' + heroLV();
+  }).join('') + (pr.stars[6] ? '<button class="chap reset" id="resetBtn2">🔄 1周目の LV 1 に もどって あそぶ</button>' : '');
+  $('mapLV').textContent = (isMaster(pr) ? '👑 マスター' : pr.lap + '周目') + '　ゆうしゃ LV ' + L + '　こうげき力 ' + attack(L);
   $('chapterList').innerHTML = items;
   $('chapterList').querySelectorAll('.chap[data-ch]').forEach(b => b.addEventListener('click', () => { $('mapScreen').classList.add('hidden'); state.ctx = C.newContext(); startChapter(+b.dataset.ch); }));
-  if (cl[6]) $('resetBtn2').addEventListener('click', () => $('resetScreen').classList.remove('hidden'));
+  if (pr.stars[6]) $('resetBtn2').addEventListener('click', () => $('resetScreen').classList.remove('hidden'));
   $('mapScreen').classList.remove('hidden');
   state.phase = 'idle';
 }
 function resetAll() {
-  memClear = {};
-  try { localStorage.removeItem('graph-clear'); localStorage.removeItem('graph-tut'); } catch (e) { /* 消せなくても その回は最初から */ }
+  memProg = newProg();
+  try { localStorage.removeItem('graph-progress'); localStorage.removeItem('graph-clear'); localStorage.removeItem('graph-tut'); } catch (e) { /* 消せなくても その回は最初から */ }
   ['resetScreen', 'clearScreen', 'mapScreen'].forEach(id => $(id).classList.add('hidden'));
   state.ctx = C.newContext(); state.phase = 'idle';
   $('titleScreen').classList.remove('hidden');
