@@ -391,7 +391,56 @@ function curve(fn, t, amp = 1, per = 1) {
   const x = t / per;
   return amp * (fn === 'sin' ? Math.sin(x) : fn === 'cos' ? Math.cos(x) : Math.tan(x));
 }
-const numV = s => ({ '0': 0, '1': 1, [MINUS + '1']: -1, '√2/2': Math.SQRT2 / 2, [MINUS + '√2/2']: -Math.SQRT2 / 2 }[s]);
+// 「あたい」の 章は θ を π/12 きざみ（u）で もつ：π/6・π/4・π/3 の 倍数も 出す
+const VAL_ABS = [['0', 0], ['1/2', 0.5], ['√2/2', Math.SQRT2 / 2], ['√3/2', Math.sqrt(3) / 2], ['1', 1], ['√3/3', Math.sqrt(3) / 3], ['√3', Math.sqrt(3)]];
+function exactStr(x) {
+  for (const [t, v] of VAL_ABS) { if (Math.abs(Math.abs(x) - v) < 1e-9) return (x < 0 && v !== 0 ? MINUS : '') + t; }
+  return null;
+}
+function valU(fn, u) {
+  const t = u * Math.PI / 12;
+  if (fn === 'tan') { if (Math.abs(Math.cos(t)) < 1e-9) return 'なし'; return exactStr(Math.tan(t)); }
+  return exactStr(fn === 'sin' ? Math.sin(t) : Math.cos(t));
+}
+function numV(s) { const neg = s.startsWith(MINUS), t = neg ? s.slice(1) : s; const v = (VAL_ABS.find(a => a[0] === t) || [0, NaN])[1]; return neg ? -v : v; }
+function angStr12(u) {   // u·π/12 を 約分して 文字に
+  if (u === 0) return '0';
+  const g = gcd(u, 12), n = u / g, d = 12 / g, an = Math.abs(n);
+  return (n < 0 ? MINUS : '') + (an === 1 ? '' : an) + 'π' + (d === 1 ? '' : '/' + d);
+}
+const flipSign = v => (v === '0' || v === 'なし' ? v : v.startsWith(MINUS) ? v.slice(1) : MINUS + v);
+const LEN = { '1/2': '√3/2', '√3/2': '1/2', '√3/3': '√3', '√3': '√3/3' };
+const lenSwapV = v => { const neg = v.startsWith(MINUS), t = neg ? v.slice(1) : v; return LEN[t] ? (neg ? MINUS : '') + LEN[t] : null; };
+// 「あたい」の 章：グラフの 目盛りを よむ（sin・cos。θ は u ＝ π/12 単位）
+//   図の 目盛り：u（あたえる θ）、s（u に いちばん 近い 山・谷）、b（s を はさんで u と おなじ たかさの θ）、z（b に 近い 0 の θ）
+//   ask：peakY 山・谷の たかさ ｜ peakT 山・谷の θ ｜ zero θ軸と まじわる θ ｜ valAt θ ＝ u の たかさ ｜ mirror b
+const WIN_T = [-3, 10];                       // −3π/4 〜 5π/2（π/4 単位）
+const UT = [WIN_T[0] * 3, WIN_T[1] * 3];
+const OFF = { cos: 0, sin: 6 };                // 山・谷は OFF ＋ 12k、0 は OFF ＋ 6 ＋ 12k
+const inT = u => u > UT[0] + 1 && u < UT[1] - 1;
+const extNear = (fn, u) => Math.round((u - OFF[fn]) / 12) * 12 + OFF[fn];
+function zerosT(fn) { const a = []; for (let k = UT[0]; k <= UT[1]; k++) if (mod(k - OFF[fn] - 6, 12) === 0 && k !== 0 && inT(k)) a.push(k); return a; }
+function tickFig(fn, u) {
+  const s = extNear(fn, u), b = 2 * s - u;
+  const z = zerosT(fn).sort((x, y) => Math.abs(x - b) - Math.abs(y - b))[0];
+  return { u, s, b, z };
+}
+// あたえる θ：π/6・π/4・π/3 の なかま（軸の 上は のぞく）。山・谷が O と かさならず、目盛りが ぜんぶ 窓に はいる
+const TICK_U = {};
+for (const fn of ['sin', 'cos']) {
+  TICK_U[fn] = [];
+  for (let u = UT[0]; u <= UT[1]; u++) {
+    if (!(u % 2 === 0 || u % 3 === 0) || mod(u, 6) === 0) continue;
+    const f = tickFig(fn, u);
+    if (f.s !== 0 && inT(u) && inT(f.s) && inT(f.b)) TICK_U[fn].push(u);
+  }
+}
+const ASKS = ['peakY', 'peakT', 'zero', 'valAt', 'mirror'];
+const askKey = (q, f) => ({ peakY: valU(q.fn, f.s) === '1' ? 'top' : 'bot', peakT: 's', zero: 'z', valAt: 'e', mirror: 'b' }[q.ask]);
+function tickAns(q) {   // 値（文字）か θ（u）
+  const f = tickFig(q.fn, q.u);
+  return { peakY: valU(q.fn, f.s), peakT: f.s, zero: f.z, valAt: valU(q.fn, q.u), mirror: f.b }[q.ask];
+}
 const opStr = s => (s > 0 ? '＞' : '＜');
 // ます（左はし w の π/2 区間）の中で fn の符号
 function cellSign(fn, w) { return Math.sign(curve(fn, (w + 1) * Math.PI / 4)); }
@@ -401,7 +450,7 @@ function zerosOf(fn, ws) { return ws.filter(w => (fn === 'cos' ? mod(w, 4) === 2
 // ---------- 問題をつくる ----------
 // prm：which { fn, w0 } 窓をずらしたグラフ → 式　｜　pick { fn, variant } 式 → グラフ4択（逆向き）
 //      period { fn, start } 1周期ぶん塗る　｜　perAsk { fn } グラフ → 周期4択（逆向き）
-//      value { fn, w }　｜　signArea { fn, s }　｜　zeros { fn, what: 'zero' | 'asym' }
+//      tick { fn, u, ask }　｜　signArea { fn, s }　｜　zeros { fn, what: 'zero' | 'asym' }
 const WIN3 = [-4, 8];    // −π〜2π
 const WIN2 = [0, 8];     // 0〜2π
 function genPrm(lv, kind, rng, opt) {
@@ -415,10 +464,11 @@ function genPrm(lv, kind, rng, opt) {
     const starts = []; for (let w = WIN3[0]; w + P <= WIN3[1]; w += 2) starts.push(w);
     return { mode: 'period', fn, start: pick(rng, starts) };
   }
-  if (lv === 3) {
-    const fn = pick(rng, FNS);
-    const ws = []; for (let w = WIN3[0]; w <= WIN3[1]; w++) if (fn === 'tan' || w % 2 === 0) ws.push(w);
-    return { mode: 'value', fn, w: pick(rng, ws) };
+  if (lv === 3) {   // 角 → たかさ と 対称が 中心
+    const fn = pick(rng, ['sin', 'cos']);
+    // ボスは 目盛りを ぜんぶ 見せるので、山・谷から π/4 以上 はなれた θ（目盛りの 字が かさならない）
+    const us = opt.boss ? TICK_U[fn].filter(u => Math.abs(u - extNear(fn, u)) >= 3) : TICK_U[fn];
+    return { mode: 'tick', fn, u: pick(rng, us), ask: pick(rng, ['peakY', 'peakT', 'zero', 'valAt', 'valAt', 'mirror', 'mirror']) };
   }
   if (lv === 4) return { mode: 'signArea', fn: pick(rng, FNS), s: rng() < 0.5 ? 1 : -1 };
   const fn = pick(rng, FNS);
@@ -451,26 +501,50 @@ function makeOptions(p, rng) {
     }
     return out;   // 小さい順
   }
-  if (q.mode === 'value') {
-    const right = val(q.fn, q.w);
-    for (const v of ['1', '0', MINUS + '1', 'なし']) out.push({ key: v, text: v === 'なし' ? '値なし' : v, types: v === right ? [] : valueTypes(q, v), correct: v === right });
+  if (q.mode === 'tick') {
+    // 正解と「判断が1つだけ違う」ものを先に、足りなければ 同じ なかまで うめる
+    const f = tickFig(q.fn, q.u), right = tickAns(q), oth = q.fn === 'sin' ? 'cos' : 'sin';
+    const cands = [[right, []]];
+    if (q.ask === 'peakY' || q.ask === 'valAt') {
+      cands.push([flipSign(right), [q.ask === 'peakY' ? 'peak' : 'sign']]);
+      if (q.ask === 'valAt') cands.push([valU(oth, q.u), ['swap']], [lenSwapV(right), ['len']]);
+      for (const v of shuffle(rng, q.ask === 'peakY' ? ['1/2', MINUS + '1/2'] : ['1', '√3/2', '√2/2', '1/2', MINUS + '1/2', MINUS + '√2/2', MINUS + '√3/2', MINUS + '1'])) cands.push([v, ['scatter']]);
+    } else {
+      const step = q.u % 2 === 0 ? 2 : 3;   // はずれも あたえた θ と おなじ なかま
+      if (q.ask === 'peakT') cands.push([f.s + pick(rng, [12, -12]), ['peak']], [f.s + 6, ['swap']], [f.s - 6, ['swap']]);
+      if (q.ask === 'zero') cands.push([f.z + 6, ['swap']], [f.z - 6, ['swap']], [f.z + pick(rng, [12, -12]), ['scatter']]);
+      if (q.ask === 'mirror') {
+        const zq = Math.round((q.u - OFF[q.fn] - 6) / 12) * 12 + OFF[q.fn] + 6;   // u に いちばん 近い 0
+        cands.push([q.u + pick(rng, [12, -12]), ['sign']], [2 * zq - q.u, ['sign']]);
+        for (const k of shuffle(rng, [1, -1, 2, -2])) cands.push([f.b + k * step, ['scatter']]);
+      }
+    }
+    const seen = [];
+    for (let [v, types] of cands) {
+      if (v === null || v === undefined || seen.includes(v) || (typeof v === 'number' && v === q.u)) continue;
+      seen.push(v);
+      // 同じ たかさの θ の はずれ：たかさが ＋ と − はんたいに なる θ は sign
+      if (q.ask === 'mirror' && v !== right) types = valU(q.fn, v) === flipSign(valU(q.fn, q.u)) ? ['sign'] : ['scatter'];
+      out.push({ key: String(v), text: typeof v === 'number' ? angStr12(v) : v, num: typeof v === 'number' ? v : numV(v), types, correct: v === right });
+      if (out.length === 4) break;
+    }
+    out.sort((a, b) => typeof right === 'number' ? a.num - b.num : b.num - a.num);   // θ は 小さい順、値は 大きい順
     return out;
   }
-}
-function valueTypes(q, x) {
-  const c = val(q.fn, q.w);
-  if ((c === 'なし') !== (x === 'なし')) return ['asym'];
-  if (c !== '0' && x === (c.startsWith(MINUS) ? c.slice(1) : MINUS + c)) return ['sign'];
-  if (q.fn !== 'tan' && x === val(q.fn === 'sin' ? 'cos' : 'sin', q.w)) return ['swap'];
-  return ['scatter'];
 }
 
 function build(lv, kind, prm, rng, opt = {}) {
   const p = { lv, kind, prm, mode: prm.mode };
   const q = prm;
   // 窓（グラフを見せる θ の範囲）
-  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : q.mode === 'signArea' ? WIN2 : WIN3;
-  if (['which', 'pick', 'perAsk', 'value'].includes(q.mode)) p.options = makeOptions(p, rng);
+  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : q.mode === 'signArea' ? WIN2 : q.mode === 'tick' ? WIN_T : WIN3;
+  if (['which', 'pick', 'perAsk', 'tick'].includes(q.mode)) p.options = makeOptions(p, rng);
+  if (q.mode === 'tick') {
+    p.fig = tickFig(q.fn, q.u); p.askKey = askKey(q, p.fig);
+    // 中ボス・大ボスは 問題集の ように 目盛りを ぜんぶ 文字で 見せて、その 1つを きく
+    if (opt.boss) { const ls = shuffle(rng, ['A', 'B', 'C', 'D', 'E', 'F']); p.letters = {}; ['top', 'bot', 's', 'z', 'e', 'b'].forEach((k, i) => { p.letters[k] = ls[i]; }); }
+  }
+  const QL = p.letters ? p.letters[p.askKey] : '？';
   if (q.mode === 'period') p.answer = { cells: cellsIn([q.start, q.start + PERIOD[q.fn]]) };
   if (q.mode === 'signArea') p.answer = { cells: cellsIn(WIN2).filter(w => cellSign(q.fn, w) === q.s) };
   if (q.mode === 'zeros') {
@@ -482,7 +556,7 @@ function build(lv, kind, prm, rng, opt = {}) {
     pick: ['▼ この 式の グラフは どれ？', q.fn ? fnLabel(q.fn) : ''],
     period: ['▼ 1しゅうきぶん ぬれ', q.fn ? fnLabel(q.fn) + ' を θ ＝ ' + angStr(q.start || 0) + ' から' : ''],
     perAsk: ['▼ この グラフの しゅうきは？', '？'],
-    value: ['▼ グラフを よめ', q.fn ? fnLabel(q.fn) + ' で θ ＝ ' + angStr(q.w || 0) + ' の とき y は？' : ''],
+    tick: ['▼ グラフの 目盛りを よめ', q.fn ? fnLabel(q.fn) + ' の グラフ。目盛り ？ の 値は？' : ''],
     signArea: ['▼ 0 ≦ θ ≦ 2π で ぬれ', q.fn ? q.fn + 'θ ' + opStr(q.s) + ' 0 の ところ' : ''],
     zeros: ['▼ −π ≦ θ ≦ 2π で ぜんぶ えらべ', q.fn ? (q.what === 'asym' ? fnLabel(q.fn) + ' の 漸近線' : fnLabel(q.fn) + ' が 0 に なる θ') : ''],
   }[q.mode];
@@ -495,7 +569,7 @@ function build(lv, kind, prm, rng, opt = {}) {
       pick: ['関数 ' + F + ' の グラフを 次から 選べ。'],
       period: [F + ' の グラフで、θ ＝ ' + angStr(q.start || 0) + ' から 1周期分の 区間を 示せ。'],
       perAsk: ['次の グラフで 表される 関数の 周期を 求めよ。'],
-      value: [F + ' の グラフに おいて、θ ＝ ' + angStr(q.w || 0) + ' の ときの y の 値を 求めよ。'],
+      tick: ['図は 関数 ' + F + ' の グラフ である。図中の 目盛り ' + QL + ' の 値を 求めよ。'],
       signArea: ['0 ≦ θ ≦ 2π の 範囲で、' + (q.fn || '') + 'θ ' + opStr(q.s) + ' 0 と なる θ の 範囲を グラフから 求めよ。'],
       zeros: q.what === 'asym' ? ['−π ≦ θ ≦ 2π の 範囲で、' + F + ' の グラフの 漸近線を すべて 求めよ。']
                                : ['−π ≦ θ ≦ 2π の 範囲で、' + F + ' の グラフと θ軸との 共有点の θ座標を すべて 求めよ。'],
@@ -505,7 +579,7 @@ function build(lv, kind, prm, rng, opt = {}) {
     p.display = E[Math.floor(rng() * E.length)];
     p.exam = true;
   }
-  p.reason = reasonLines(p);
+  p.reason = reasonLines(p, QL);
   if (p.exam) p.reason.push('この 問題は 第' + lv + '章の「' + p.shortText + '」と おなじ');
   return p;
 }
@@ -543,18 +617,19 @@ function classify(p, ans) {
   }
 }
 const TYPE_TEXT = {
+  len: '1/2 と √3/2（ひくい・たかい）が いれかわっている', peak: '山（いちばん うえ）と 谷（いちばん した）を とりちがえた',
   swap: 'sin と cos が いれかわっている', tan: 'tan と sin・cos を とりちがえた', amp: 'たかさ（ふりはば）が ちがう',
   period: 'しゅうき（くりかえしの はば）が ちがう',
   minimal: 'くりかえしの はばでは あるけど、いちばん 小さく ない', asym: '0 に なる ところと 値が ない ところ（漸近線）を とりちがえた',
   sign: '＋ と − が はんたい', half: 'まだ ほかにも ある', scatter: 'えらびかたが ばらばら',
 };
-const MASTER_TEXT = { minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
+const MASTER_TEXT = { peak: '山 と 谷', len: '1/2 と √3/2', minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
 function describe(p, cls) { return cls.types.map(t => (t === 'scatter' && p.options ? 'ちがう ものを えらんだ' : TYPE_TEXT[t])).join('、'); }
 function masterText(t) { return MASTER_TEXT[t]; }
 
 // ---------- 理由 ----------
 const LOOK = 'sin は θ＝0 で 0 から のぼる、cos は θ＝0 で 1、tan は 縦の点線（漸近線）の あいだを のぼる';
-function reasonLines(p) {
+function reasonLines(p, QL) {
   const q = p.prm, L = [];
   if (q.mode === 'which' || q.mode === 'pick') { L.push(LOOK); L.push('→ ' + fnLabel(q.fn)); }
   if (q.mode === 'period' || q.mode === 'perAsk') {
@@ -564,12 +639,22 @@ function reasonLines(p) {
     if (q.mode === 'period') L.push('→ θ ＝ ' + angStr(q.start) + ' から ' + angStr(q.start + PERIOD[q.fn]) + ' まで');
     else L.push('→ ' + fnLabel(q.fn) + ' の しゅうきは ' + angStr(PERIOD[q.fn]));
   }
-  if (q.mode === 'value') {
-    const v = val(q.fn, q.w);
-    if (v === 'なし') L.push('tan は θ ＝ π/2 ＋ kπ で 値が ない（漸近線）');
-    else L.push('θ ＝ ' + angStr(q.w) + ' の ところの グラフの たかさ → y ＝ ' + v);
-    if (q.fn === 'sin') L.push('sin は 単位円の y座標');
-    if (q.fn === 'cos') L.push('cos は 単位円の x座標');
+  if (q.mode === 'tick') {
+    const f = p.fig, A = angStr12, ans = tickAns(q);
+    const shape = q.fn === 'cos' ? 'cos は θ ＝ 0 で 山、π で 谷、π/2・3π/2 で 0（2π ごとに くりかえす）'
+                                 : 'sin は θ ＝ π/2 で 山、3π/2 で 谷、0・π で 0（2π ごとに くりかえす）';
+    if (q.ask === 'peakY') L.push('山の たかさは 1、谷の たかさは −1');
+    if (q.ask === 'peakT' || q.ask === 'zero') L.push(shape);
+    if (q.ask === 'valAt') {
+      L.push(QL + ' は θ ＝ ' + A(q.u) + ' の ときの たかさ ＝ ' + q.fn + ' ' + A(q.u));
+      L.push(q.fn === 'sin' ? 'sin は 単位円の y座標' : 'cos は 単位円の x座標');
+    }
+    if (q.ask === 'mirror') {
+      const dd = Math.abs(f.s - q.u);
+      L.push('グラフは 山・谷の 縦線（θ ＝ ' + A(f.s) + '）で 左右 対称');
+      L.push(A(q.u) + ' は ' + A(f.s) + ' から ' + A(dd) + ' はなれている → ' + A(f.s) + (f.b > f.s ? ' ＋ ' : ' − ') + A(dd));
+    }
+    L.push('→ ' + QL + ' ＝ ' + (typeof ans === 'number' ? A(ans) : ans));
   }
   if (q.mode === 'signArea') {
     L.push(opStr(q.s) + ' 0 は グラフが θ軸より ' + (q.s > 0 ? 'うえ' : 'した'));
@@ -598,6 +683,8 @@ function likeOK(q, m, types) {
     if (t === 'half' && q.mode !== 'zeros') return false;
     if (t === 'asym' && q.fn !== 'tan') return false;
     if (t === 'sign' && q.fn !== m.fn) return false;
+    if (t === 'len' && (q.fn !== m.fn || !lenSwapV(valU(q.fn, q.u) || ''))) return false;
+    if (q.mode === 'tick' && q.ask !== m.ask) return false;   // 目盛りは おなじ ききかたで
   }
   return true;
 }
@@ -609,7 +696,7 @@ function clash(a, b) {
   if (a.mode === 'which' && b.mode === 'which') return a.w0 === b.w0;
   if (a.mode === 'pick' && b.mode === 'pick') return a.variant === b.variant;   // はずれの絵がちがえば別の問題
   if (a.mode === 'period' && b.mode === 'period') return a.start === b.start;
-  if (a.mode === 'value') return a.w === b.w;
+  if (a.mode === 'tick') return a.ask === b.ask && tickAns(a) === tickAns(b);   // おなじ ことを きく 問題
   if (a.mode === 'signArea') return a.s === b.s;
   if (a.mode === 'zeros') return a.what === b.what;
   return true;
@@ -656,7 +743,7 @@ function makeProblem(slot, ctx, rng) {
   const w = ctx.weak[slot.lv];
   const notLast = prm => !(ctx.last && clash(prm, ctx.last));
   const fresh = prm => notLast(prm) && !ctx.recent.includes(slot.kind + JSON.stringify(prm));
-  const gen = () => genPrm(slot.lv, slot.kind, rng, {});
+  const gen = () => genPrm(slot.lv, slot.kind, rng, { boss: !!slot.boss });
   let prm = null, target = false;
   // 1. 苦手の問題（直前とかぶらなければよい。種類が少ない問題もあるので、最近の問題との重なりは問わない）
   if (w) for (let i = 0; i < 400 && !prm; i++) { const c = gen(); if (likeOK(c, w.like, w.types) && notLast(c)) { prm = c; target = true; } }
@@ -685,7 +772,7 @@ function record(ctx, p, ok, cls, ms) {
 }
 
 G.GraphCore = {
-  FNS, PERIOD, angStr, val, curve, numV, cellSign, isAsym, zerosOf, cellsIn, linesIn, WIN2, WIN3,
+  FNS, PERIOD, angStr, angStr12, val, valU, curve, numV, cellSign, isAsym, zerosOf, cellsIn, linesIn, WIN2, WIN3, WIN_T, TICK_U, tickFig, tickAns,
   genPrm, build, judge, classify, describe, masterText, likeOK, clash,
   CHAPTERS, NORMAL, HAS_REV, chapterPlan, zakoHP, midHP, finalHP, CRIT, comboBonus, damage, newContext, makeProblem, record, mulberry32,
 };
@@ -857,6 +944,12 @@ function drawAxes(ctx, v, d, opt) {
   ctx.beginPath(); ctx.moveTo(0, VY(v, 0)); ctx.lineTo(v.W, VY(v, 0)); ctx.stroke();
   if (v.w0 <= 0 && v.w1 >= 0) { ctx.beginPath(); ctx.moveTo(VX(v, 0), 0); ctx.lineTo(VX(v, 0), v.H); ctx.stroke(); }
   if (opt.thumb) return;
+  ctx.font = (10 * d) + 'px sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  // O は グラフに かくれない がわ（sin は 左下を とおるので 左上）
+  ctx.textAlign = 'right'; ctx.textBaseline = opt.oUp ? 'bottom' : 'top'; ctx.fillText('O', (v.w0 <= 0 && v.w1 >= 0 ? VX(v, 0) : 0) - 3 * d, VY(v, 0) + (opt.oUp ? -3 : 3) * d);
+  ctx.font = 'italic ' + (12 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+  ctx.fillText('θ', v.W - 3 * d, VY(v, 0) - 2 * d);
+  if (opt.bare) return;   // 目盛りの 問題：数字は 書かない（問題集の 図と おなじ）
   // 目盛りの字：θ は π/2 ごと（分数は上下に積む）、y は 1 と −1 だけ
   ctx.fillStyle = 'rgba(255,255,255,0.75)';
   for (let w = Math.ceil(v.w0 / 2) * 2; w <= v.w1; w += 2) {
@@ -868,9 +961,6 @@ function drawAxes(ctx, v, d, opt) {
   ctx.font = (10 * d) + 'px sans-serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   const yx = v.w0 <= 0 && v.w1 >= 0 ? VX(v, 0) - 4 * d : VX(v, v.w0) - 2 * d;
   ctx.fillText('1', yx, VY(v, 1)); ctx.fillText('−1', yx, VY(v, -1));
-  ctx.textAlign = 'right'; ctx.textBaseline = 'top'; ctx.fillText('O', (v.w0 <= 0 && v.w1 >= 0 ? VX(v, 0) : 0) - 3 * d, VY(v, 0) + 3 * d);
-  ctx.font = 'italic ' + (12 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-  ctx.fillText('θ', v.W - 3 * d, VY(v, 0) - 2 * d);
 }
 function tickLabel(ctx, d, nu, de, x, y) {
   ctx.font = (9 * d) + 'px sans-serif';
@@ -920,6 +1010,64 @@ function drawThumb(cv, g) {
   drawCurve(ctx, v, g, d, '#fff', 2, true);
 }
 
+// 目盛りの 問題の 図：点線と 目盛り（ザコは きく ところに ？、ボスは ぜんぶ 文字）
+function drawTicks(ctx, v, d, q) {
+  const m = q.prm, f = q.fig, L = q.letters, YEL = '#ffd84a';
+  const yAt = u => C.numV(C.valU(m.fn, u));
+  const X = u => VX(v, u / 3), Y = y => VY(v, y), x0 = VX(v, 0), y0 = VY(v, 0);
+  const keys = L ? ['top', 'bot', 's', 'z', 'e', 'b'] : [q.askKey];
+  const given = L || q.askKey === 'e' || q.askKey === 'b';
+  const has = k => keys.includes(k);
+  // 点線
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.2 * d; ctx.setLineDash([4 * d, 3 * d]);
+  ctx.beginPath();
+  for (const [k, y] of [['top', 1], ['bot', -1]]) if (has(k)) { ctx.moveTo(x0, Y(y)); ctx.lineTo(v.W, Y(y)); }
+  if (has('s')) { ctx.moveTo(X(f.s), y0); ctx.lineTo(X(f.s), Y(yAt(f.s))); }
+  if (given) {
+    const ye = yAt(f.u), xe = has('b') ? Math.max(X(f.u), X(f.b)) : X(f.u);
+    ctx.moveTo(X(f.u), y0); ctx.lineTo(X(f.u), Y(ye));
+    if (has('e') || has('b')) { ctx.moveTo(x0, Y(ye)); ctx.lineTo(xe, Y(ye)); }
+    if (has('b')) { ctx.moveTo(X(f.b), y0); ctx.lineTo(X(f.b), Y(ye)); }
+  }
+  ctx.stroke(); ctx.setLineDash([]);
+  // 字：答えを 見せる ときは きいろで 値に かえる
+  const ans = C.tickAns(m), rev = state.reveal;
+  const text = k => (rev && k === q.askKey ? (typeof ans === 'number' ? C.angStr12(ans) : ans) : L ? L[k] : '？');
+  const color = k => (k === q.askKey ? YEL : '#fff');
+  function onY(k, y) {
+    ctx.font = 'bold ' + (13 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    outlined(text(k), x0 - 5 * d, Y(y), color(k));
+  }
+  function onT(k, u, s, col) {   // θ軸の 目盛り：グラフの 点と はんたい がわに 書く
+    const below = yAt(u) >= 0 || k === 'z';
+    if (rev && k === q.askKey || s) {
+      const str = s || C.angStr12(ans), neg = str.startsWith('−'), body = neg ? str.slice(1) : str;
+      const [nu, de] = body.includes('/') ? body.split('/') : [body, ''];
+      ctx.fillStyle = col || color(k);
+      tickLabel(ctx, d, (neg ? '−' : '') + nu, de, X(u), below ? y0 + 4 * d : y0 - 4 * d - (de ? 21 : 11) * d);
+      return;
+    }
+    ctx.font = 'bold ' + (13 * d) + 'px serif'; ctx.textAlign = 'center'; ctx.textBaseline = below ? 'top' : 'bottom';
+    // 0 の 目盛りは グラフが θ軸より うえに ある がわ（のぼる ところなら 右下、くだる ところなら 左下）
+    const t = u * Math.PI / 12, up = C.curve(m.fn, t + 0.01) > C.curve(m.fn, t - 0.01);
+    outlined(text(k), X(u) + (k === 'z' ? (up ? 8 : -8) * d : 0), below ? y0 + 4 * d : y0 - 4 * d, color(k));
+  }
+  if (given) onT('u', f.u, C.angStr12(f.u), '#fff');
+  if (has('top')) onY('top', 1);
+  if (has('bot')) onY('bot', -1);
+  if (has('e')) onY('e', yAt(f.u));
+  if (has('s')) onT('s', f.s);
+  if (has('z')) onT('z', f.z);
+  if (has('b')) onT('b', f.b);
+  if (rev) {   // 答えの 点
+    const [u, y] = { top: [0, 1], bot: [0, -1], s: [f.s, yAt(f.s)], z: [f.z, 0], e: [f.u, yAt(f.u)], b: [f.b, yAt(f.b)] }[q.askKey];
+    ctx.fillStyle = YEL; ctx.beginPath(); ctx.arc(X(u), Y(y), 5 * d, 0, Math.PI * 2); ctx.fill();
+  }
+  function outlined(s, x, y, col) {
+    ctx.lineWidth = 4 * d; ctx.strokeStyle = '#000a18'; ctx.lineJoin = 'round'; ctx.strokeText(s, x, y);
+    ctx.fillStyle = col; ctx.fillText(s, x, y);
+  }
+}
 function viewKind() {
   const q = p();
   if (!q || q.options) return 'ask';
@@ -930,7 +1078,7 @@ function draw() {
   const ctx = canvas.getContext('2d'), d = DPR, q = p();
   if (!q) { const v = view(canvas, C.WIN3, 1.6); drawAxes(ctx, v, d, {}); return; }
   const m = q.prm, v = view(canvas, q.win, yRange(m.fn));
-  drawAxes(ctx, v, d, {});
+  drawAxes(ctx, v, d, { bare: m.mode === 'tick', oUp: m.mode === 'tick' && m.fn === 'sin' });
   const vk = viewKind();
   const YEL = '#ffd84a', BLUE = '#5b8cff';
   // ます（区間）を塗る
@@ -957,12 +1105,7 @@ function draw() {
     ctx.fillText('↓ したの 4つから えらぼう', v.W / 2, v.H / 2);
   }
   // 答えの図：値の点、式の名前
-  if (state.reveal && q.mode === 'value') {
-    const y = C.val(m.fn, m.w);
-    ctx.strokeStyle = YEL; ctx.lineWidth = 2 * d; ctx.setLineDash([4 * d, 3 * d]);
-    ctx.beginPath(); ctx.moveTo(VX(v, m.w), 0); ctx.lineTo(VX(v, m.w), v.H); ctx.stroke(); ctx.setLineDash([]);
-    if (y !== 'なし') { ctx.fillStyle = YEL; ctx.beginPath(); ctx.arc(VX(v, m.w), VY(v, C.numV(y)), 6 * d, 0, Math.PI * 2); ctx.fill(); }
-  }
+  if (q.mode === 'tick') drawTicks(ctx, v, d, q);
   if (state.reveal && (q.mode === 'which' || q.mode === 'perAsk')) {
     ctx.fillStyle = YEL; ctx.font = 'bold ' + (13 * d) + 'px serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText('y ＝ ' + m.fn + 'θ', 8 * d, 6 * d);
