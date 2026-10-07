@@ -409,7 +409,8 @@ function makeOptions(p, rng) {
   if (q.mode === 'perAsk') {
     const right = PERIOD[q.fn];
     for (const w of [2, 4, 8, 16]) {
-      const types = w === right ? [] : (w === 4 || w === 8) ? ['period'] : ['scatter'];
+      // 周期の 倍数（sin・cos の 4π、tan の 2π・4π）は くりかえしの はばだが、いちばん 小さく ない
+      const types = w === right ? [] : (w > right && w % right === 0) ? ['minimal'] : (w === 4 || w === 8) ? ['period'] : ['scatter'];
       out.push({ key: String(w), text: angStr(w), types, correct: w === right });
     }
     return out;   // 小さい順
@@ -469,6 +470,7 @@ function classify(p, ans) {
   if (q.mode === 'period') {
     const S = ans.cells.slice().sort((a, b) => a - b);
     const run = S.every((w, i) => w === q.start + 2 * i);
+    if (run && S.length > A.cells.length && S.length % A.cells.length === 0) return { types: ['minimal'] };   // 2周期ぶん など
     if (run && S.length > 0 && S.length !== A.cells.length && (S.length === 2 || S.length === 4)) return { types: ['period'] };
     return { types: ['scatter'] };
   }
@@ -487,10 +489,11 @@ function classify(p, ans) {
 }
 const TYPE_TEXT = {
   swap: 'sin と cos が いれかわっている', tan: 'tan と sin・cos を とりちがえた', amp: 'たかさ（ふりはば）が ちがう',
-  period: 'しゅうき（くりかえしの はば）が ちがう', asym: '0 に なる ところと 値が ない ところ（漸近線）を とりちがえた',
+  period: 'しゅうき（くりかえしの はば）が ちがう',
+  minimal: 'くりかえしの はばでは あるけど、いちばん 小さく ない', asym: '0 に なる ところと 値が ない ところ（漸近線）を とりちがえた',
   sign: '＋ と − が はんたい', half: 'まだ ほかにも ある', scatter: 'えらびかたが ばらばら',
 };
-const MASTER_TEXT = { swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
+const MASTER_TEXT = { minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
 function describe(p, cls) { return cls.types.map(t => (t === 'scatter' && p.options ? 'ちがう ものを えらんだ' : TYPE_TEXT[t])).join('、'); }
 function masterText(t) { return MASTER_TEXT[t]; }
 
@@ -501,6 +504,8 @@ function reasonLines(p) {
   if (q.mode === 'which' || q.mode === 'pick') { L.push(LOOK); L.push('→ ' + fnLabel(q.fn)); }
   if (q.mode === 'period' || q.mode === 'perAsk') {
     L.push('sin・cos は 2π で もとに もどる（4ます）、tan は π（2ます）');
+    // 周期は くりかえしの はばの うち いちばん 小さい 正の あたい
+    L.push(q.fn === 'tan' ? '2π や 4π でも もとに もどるが、周期は いちばん 小さい π' : '4π でも もとに もどるが、周期は いちばん 小さい 2π');
     if (q.mode === 'period') L.push('→ θ ＝ ' + angStr(q.start) + ' から ' + angStr(q.start + PERIOD[q.fn]) + ' まで');
     else L.push('→ ' + fnLabel(q.fn) + ' の しゅうきは ' + angStr(PERIOD[q.fn]));
   }
@@ -534,7 +539,7 @@ function likeOK(q, m, types) {
     if (t === 'swap' && q.mode !== 'which' && q.mode !== 'pick' && q.mode !== 'zeros' && q.fn !== m.fn) return false;
     if (t === 'tan' && !['which', 'pick'].includes(q.mode) && q.fn !== m.fn) return false;   // 種類の問題なら どの関数でも
     if (t === 'amp' && !(q.mode === 'pick' && q.variant === 'amp')) return false;           // 振幅 → 振幅を変えた絵の4択
-    if (t === 'period' && q.mode === 'period' && q.fn !== m.fn) return false;              // 塗る問題は同じ関数、「周期は？」は どれでも
+    if ((t === 'period' || t === 'minimal') && q.mode === 'period' && q.fn !== m.fn) return false;              // 塗る問題は同じ関数、「周期は？」は どれでも
     if (t === 'half' && q.mode !== 'zeros') return false;
     if (t === 'asym' && q.fn !== 'tan') return false;
     if (t === 'sign' && q.fn !== m.fn) return false;
