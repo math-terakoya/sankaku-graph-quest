@@ -637,14 +637,17 @@ function chapterPlan(ch, rng) {
   const rev = HAS_REV.includes(C.lv) ? ri(rng, 0, NORMAL - 1) : -1;
   return { zako: [...Array(NORMAL).keys()].map(i => ({ lv: C.lv, kind: i === rev ? 'rev' : 'fwd' })), boss: [{ lv: C.lv, kind: 'fwd', boss: true }] };
 }
-// ゆうしゃ LV ＝ 1 ＋ クリアした 章の 数。敵も LV に あわせて つよく なる（問題の 数は だいたい 同じ）
-const zakoHP = L => 1 + L;
-const midHP = L => 3 + 2 * L;
-const FINAL_HP = 40;
+// 敵は 攻撃力ほどには つよく ならない（LV が 上がるほど はやく たおせる）
+//   ザコ：いつも 1発。中ボス：1周目 2〜3問 → 3周目 1問。大ボス：1周目 5問 → 3周目 3問くらい
+const zakoHP = L => 1 + Math.floor(L / 2);
+const midHP = L => 7 + Math.floor(L / 2);
+const finalHP = L => 34 + L;
 const CRIT = 1 / 8;
-// ダメージ：きほん（ザコの 問題 2、逆向き・問題集の 言い回し 3）＋（LV − 1）、苦手の 問題に 正解で ＋1、会心の 一撃で 2倍（こくふくの 一撃は かならず 会心）
-function damage(p, L, ev, rng) {
-  let d = (p.kind === 'rev' || p.exam ? 3 : 2) + (L - 1) + (p.target && p.target.lv ? 1 : 0);
+// れんぞく せいかいの ボーナス：2問目 ＋1、3問目 ＋2、4問目から ＋3（まちがえると 0 に もどる）
+const comboBonus = n => Math.min(Math.max(n - 1, 0), 3);
+// ダメージ：きほん（ザコの 問題 2、逆向き・問題集の 言い回し 3）＋（LV − 1）＋ 苦手の 問題 1 ＋ れんぞく せいかい → 会心の 一撃で 2倍（こくふくの 一撃は かならず 会心）
+function damage(p, L, ev, rng, combo = 0) {
+  let d = (p.kind === 'rev' || p.exam ? 3 : 2) + (L - 1) + (p.target && p.target.lv ? 1 : 0) + comboBonus(combo);
   const crit = (ev && ev.mastered && ev.mastered.length > 0) || rng() < CRIT;
   return { d: crit ? d * 2 : d, crit };
 }
@@ -684,7 +687,7 @@ function record(ctx, p, ok, cls, ms) {
 G.GraphCore = {
   FNS, PERIOD, angStr, val, curve, numV, cellSign, isAsym, zerosOf, cellsIn, linesIn, WIN2, WIN3,
   genPrm, build, judge, classify, describe, masterText, likeOK, clash,
-  CHAPTERS, NORMAL, HAS_REV, chapterPlan, zakoHP, midHP, FINAL_HP, CRIT, damage, newContext, makeProblem, record, mulberry32,
+  CHAPTERS, NORMAL, HAS_REV, chapterPlan, zakoHP, midHP, finalHP, CRIT, comboBonus, damage, newContext, makeProblem, record, mulberry32,
 };
 })(typeof window !== 'undefined' ? window : this);
 </script>
@@ -717,15 +720,21 @@ const chap = () => C.CHAPTERS[state.ch - 1];
 const atBoss = () => state.stage === 'boss';
 // ゆうしゃ LV ＝ 1 ＋ クリアした 章（さいごの 章を のぞく）の 数
 // ---------- 周回の きろく ----------
-// lap：何周目か（6 で 👑 マスター）、cur：この周で クリアした 章、gained：LV が 上がった 回数、stars：章ごとの ★（クリアした 周の 数）
+// lap：何周目か（4 で 👑 マスター。★は 3つまで）、cur：この周で クリアした 章、gained：LV が 上がった 回数、stars：章ごとの ★（クリアした 周の 数）
 // LV が 上がるのは「その周で はじめて クリアした 章」だけ。同じ周で 同じ章を くりかえしても 上がらない（均等に あそぶ）
-const MAX_LAP = 5;
+const MAX_LAP = 3;   // ★3つ（あと1周で そろう、と 思える 数）
 let memProg = null;
 function newProg() { return { lap: 1, cur: {}, gained: 0, stars: {} }; }
 function loadProg() {
   try {
     const raw = localStorage.getItem('graph-progress');
-    if (raw) return JSON.parse(raw);
+    if (raw) {   // ★5 だった ころの きろくは 3 に そろえる
+      const pr = JSON.parse(raw);
+      if (pr.lap > MAX_LAP + 1) { pr.lap = MAX_LAP + 1; pr.cur = {}; }
+      pr.gained = Math.min(pr.gained, 5 * MAX_LAP);
+      Object.keys(pr.stars).forEach(k => { pr.stars[k] = Math.min(pr.stars[k], MAX_LAP); });
+      return pr;
+    }
     const old = JSON.parse(localStorage.getItem('graph-clear') || 'null');   // 前の版の きろくを ひきつぐ
     if (old) {
       const pr = newProg();
@@ -1025,8 +1034,8 @@ function startChapter(ch) {
   state.ch = ch;
   const c = chap(), L = heroLV();
   state.plan = C.chapterPlan(ch, rng);
-  state.zi = 0; state.fi = 0; state.lives = MAX_LIVES;
-  if (c.final) { state.stage = 'boss'; setEnemyHP(C.FINAL_HP); }
+  state.zi = 0; state.fi = 0; state.lives = MAX_LIVES; state.combo = 0;
+  if (c.final) { state.stage = 'boss'; setEnemyHP(C.finalHP(L)); }
   else { state.stage = 'zako'; setEnemyHP(C.zakoHP(L)); }
   monsterEl.classList.remove('dying');
   newProblem();
@@ -1050,17 +1059,19 @@ function submit() {
 }
 function onCorrect(ev) {
   const c = chap(), e = atBoss() ? c.boss : c.enemy, q = p();
-  const hit = C.damage(q, heroLV(), ev, rng);
+  state.combo = (state.combo || 0) + 1;
+  const hit = C.damage(q, heroLV(), ev, rng, state.combo);
   state.phase = 'busy'; state.reveal = true; state.hp -= hit.d;
   // 大ボスは 5つの 単元を 出しきるまで たおれない
   let hold = false;
-  if (c.final && state.hp <= 0 && state.fi < state.plan.boss.length - 1) { state.hp = 1; hold = true; }
+  if (c.final && loadProg().lap === 1 && state.hp <= 0 && state.fi < state.plan.boss.length - 1) { state.hp = 1; hold = true; }   // 1周目だけ 5つ ぜんぶ 出す
   draw(); renderControls(); renderStatus();
   flashScreen(); if (hit.crit) setTimeout(flashScreen, 180);
   monsterAnim('hit'); showDamage('-' + hit.d, hit.crit ? '#ff9900' : '#ffff00');
   const lines = ['せいかい！　' + e.name + 'に　' + hit.d + ' の ダメージ！'];
   if (hit.crit) lines.unshift('かいしんの いちげき！');
   if (q.target && q.target.lv) lines.push('（にがての もんだいに せいかい ＋1）');
+  if (C.comboBonus(state.combo) > 0) lines.push('れんぞく せいかい ×' + state.combo + '（＋' + C.comboBonus(state.combo) + '）');
   ev.mastered.forEach(t => lines.push('◎ ' + C.masterText(t) + ' こくふく！'));
   if (hold) lines.push(e.name + '「まだ たおれぬ！」');
   setMessage(lines.join('\n'));
@@ -1110,7 +1121,7 @@ function chapterClear() {
     const done = pr.lap;
     if (!isMaster(pr)) { pr.lap += 1; pr.cur = {}; }
     lines.push('GAME CLEAR!　' + Math.min(done, MAX_LAP) + '周目 クリア！');
-    lines.push(isMaster(pr) ? '👑 ★5 まで あつめた！ マスター！' : 'つぎは ' + pr.lap + '周目。5つの 章を もう いちど クリアしよう（LV も また あがる）');
+    lines.push(isMaster(pr) ? '👑 ★3 まで あつめた！ マスター！' : 'つぎは ' + pr.lap + '周目。5つの 章を もう いちど クリアしよう（LV も また あがる）');
   }
   saveProg(pr);
   $('clearHero').textContent = c.boss.sprite;
@@ -1119,7 +1130,7 @@ function chapterClear() {
   $('resetBtn1').classList.toggle('hidden', !c.final);
   $('clearScreen').classList.remove('hidden');
 }
-function starStr(n) { return '<span class="stars">' + '★'.repeat(n) + '<span class="dim">' + '☆'.repeat(MAX_LAP - n) + '</span></span>'; }
+function starStr(n) { n = Math.min(n, MAX_LAP); return '<span class="stars">' + '★'.repeat(n) + '<span class="dim">' + '☆'.repeat(MAX_LAP - n) + '</span></span>'; }
 function showMap() {
   const pr = loadProg(), L = heroLV();
   const items = C.CHAPTERS.map(c => {
@@ -1145,6 +1156,7 @@ function resetAll() {
 }
 function onWrong(cls) {
   const q = p();
+  state.combo = 0;
   state.lives -= 1; state.phase = 'next'; state.reveal = true; state.view = 'ans';
   draw(); renderControls(); renderStatus();
   monsterAnim('miss-dmg'); showDamage('MISS', '#ff4444');
