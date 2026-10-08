@@ -422,7 +422,10 @@ const extNear = (fn, u) => Math.round((u - OFF[fn]) / 12) * 12 + OFF[fn];
 function zerosT(fn) { const a = []; for (let k = UT[0]; k <= UT[1]; k++) if (mod(k - OFF[fn] - 6, 12) === 0 && k !== 0 && inT(k)) a.push(k); return a; }
 function tickFig(fn, u) {
   const s = extNear(fn, u), b = 2 * s - u;
-  const z = zerosT(fn).sort((x, y) => Math.abs(x - b) - Math.abs(y - b))[0];
+  // z：b に いちばん 近い 0。0 の 字は θ軸の 下。u・b の 字も 下に くる（たかさが 正の）ときは、
+  //    字が かさならないよう u から π/3、b から π/4 以上 はなす（問題集 268 の ように 上に くる ときは そのまま）
+  const below = !valU(fn, u).startsWith(MINUS);
+  const z = zerosT(fn).filter(k => !below || (Math.abs(k - u) >= 4 && Math.abs(k - b) >= 3)).sort((x, y) => Math.abs(x - b) - Math.abs(y - b))[0];
   return { u, s, b, z };
 }
 // あたえる θ：π/6・π/4・π/3 の なかま（軸の 上は のぞく）。山・谷が O と かさならず、目盛りが ぜんぶ 窓に はいる
@@ -432,7 +435,7 @@ for (const fn of ['sin', 'cos']) {
   for (let u = UT[0]; u <= UT[1]; u++) {
     if (!(u % 2 === 0 || u % 3 === 0) || mod(u, 6) === 0) continue;
     const f = tickFig(fn, u);
-    if (f.s !== 0 && inT(u) && inT(f.s) && inT(f.b)) TICK_U[fn].push(u);
+    if (f.s !== 0 && inT(u) && inT(f.s) && inT(f.b) && f.z !== undefined) TICK_U[fn].push(u);
   }
 }
 const ASKS = ['peakY', 'peakT', 'zero', 'valAt', 'mirror'];
