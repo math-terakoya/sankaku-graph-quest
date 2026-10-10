@@ -106,6 +106,10 @@ background: #000; color: #aaa; border: 1px solid #666;
 font-family: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer;
 }
 #skipTut.hidden { display: none; }
+/* ゲーム中に 章えらびへ もどる ボタン（れんしゅう中と ダメージの あいだは かくす） */
+#mapBtn { position: absolute; top: 4px; right: 6px; background: #000; color: #aaa; border: 1px solid #666; font-family: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; z-index: 3; }
+#mapBtn.hidden { display: none; }
+#problem .label { padding-right: 46px; padding-left: 46px; }
 
 #planeWrap { flex: 1 1 0; min-height: 0; position: relative; overflow: hidden; }
 #plane {
@@ -181,9 +185,12 @@ transform: translate(-50%, -100%); animation: tapDown 0.8s ease-in-out infinite;
 /* — オーバーレイ — */
 .overlay {
 position: absolute; inset: 0; background: #000;
-display: flex; flex-direction: column; align-items: center; justify-content: center;
+display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
 padding: 24px; z-index: 100; text-align: center;
+overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
+/* 入りきる ときは まんなか、入りきらない ときは 上から スクロール（章が ふえても 下の ボタンまで とどく）。上下の 見えない すきまで まんなかに よせる */
+.overlay::before, .overlay::after { content: ''; flex: 1 0 0; }
 .overlay.hidden { display: none; }
 .overlay h1 { font-size: 28px; color: #ffff00; letter-spacing: 3px; margin-bottom: 20px; text-shadow: 3px 3px 0 #884400; line-height: 1.4; }
 .overlay p { font-size: 14px; color: #fff; line-height: 2; margin-bottom: 16px; letter-spacing: 1px; }
@@ -300,6 +307,14 @@ letter-spacing: 4px; z-index: 20; animation: lvUp 1.8s forwards; pointer-events:
     <button class="how-btn" id="resetNo">やめる</button>
   </div>
 
+  <div class="overlay hidden" id="quitScreen">
+    <div class="hero">🗺️</div>
+    <h1 style="font-size:20px;">しょうえらびに もどる？</h1>
+    <p>この 章は さいしょから やりなおしに なります。</p>
+    <button class="start-btn" id="quitYes">もどる</button>
+    <button class="how-btn" id="quitNo">つづける</button>
+  </div>
+
   <div class="overlay hidden" id="gameOverScreen">
     <div class="hero">💀</div>
     <h1 style="color:#ff4444;text-shadow:3px 3px 0 #440000;">ぜんめつ…</h1>
@@ -319,6 +334,7 @@ letter-spacing: 4px; z-index: 20; animation: lvUp 1.8s forwards; pointer-events:
 
   <div class="rpg-window" id="battle">
     <button id="skipTut" class="hidden">とばす ▶▶</button>
+    <button id="mapBtn" class="hidden">≡ しょう</button>
     <div id="enemy"><div id="monster">〰️</div><div id="monsterName">ナミガタ</div></div>
     <div id="problem">
       <div class="label" id="problemLabel">&nbsp;</div>
@@ -955,7 +971,10 @@ function renderProblem() {
   $('problemExpr').classList.toggle('exam', !!p().exam);
 }
 function show(el, on) { el.classList.toggle('hidden', !on); }
+// 章えらびへ もどる ボタン：こたえを えらんでいる ときと 答え合わせの ときだけ（ダメージの 演出中は 出さない）
+function renderMapBtn() { $('mapBtn').classList.toggle('hidden', !!state.tut || !(state.phase === 'play' || state.phase === 'next')); }
 function renderControls() {
+  renderMapBtn();
   const q = p(), next = state.phase === 'next';
   const opts = q && q.options ? q.options : [];
   optBtns.forEach((b, i) => {
@@ -1541,11 +1560,19 @@ $('clearBtn').addEventListener('click', () => { $('clearScreen').classList.add('
 $('resetBtn1').addEventListener('click', () => $('resetScreen').classList.remove('hidden'));
 $('resetYes').addEventListener('click', resetAll);
 $('resetNo').addEventListener('click', () => $('resetScreen').classList.add('hidden'));
+$('mapBtn').addEventListener('click', () => { if (!state.tut && (state.phase === 'play' || state.phase === 'next')) $('quitScreen').classList.remove('hidden'); });
+$('quitNo').addEventListener('click', () => $('quitScreen').classList.add('hidden'));
+$('quitYes').addEventListener('click', () => {
+  $('quitScreen').classList.add('hidden');
+  gameEl.classList.remove('boss-mid', 'boss-final');
+  state.phase = 'idle'; state.onNext = null; renderMapBtn();
+  showMap();
+});
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   e.preventDefault();
   if (e.repeat) return;
-  if (!$('resetScreen').classList.contains('hidden') || !$('mapScreen').classList.contains('hidden')) return;
+  if (!$('resetScreen').classList.contains('hidden') || !$('mapScreen').classList.contains('hidden') || !$('quitScreen').classList.contains('hidden')) return;
   const overlayBtn = { titleScreen: 'startBtn', tutDoneScreen: 'goBtn', clearScreen: 'clearBtn', gameOverScreen: 'retryBtn' };
   for (const id in overlayBtn) if (!$(id).classList.contains('hidden')) { $(overlayBtn[id]).click(); return; }
   if (state.phase === 'next') next();
