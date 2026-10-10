@@ -468,6 +468,11 @@ const shiftSols = (fn, a, v) => solveU(fn, v, a, a + 24).map(t => t - a).sort((x
 const solsText = S => 'θ ＝ ' + S.map(angStr12).join('、');
 const tText = (lhs, S) => lhs + ' ＝ ' + S.map(angStr12).join('、');
 const rangeText = (lo, hi) => angStr12(lo) + ' ≦ t ＜ ' + angStr12(hi);
+// 範囲だけ 変える 方程式（関数は ずらさない）：fn θ ＝ v（lo ≦ θ ＜ lo ＋ 2π）。t に おきかえる まえの 練習
+//   正解・いつもの 0 ≦ θ ＜ 2π で さがした・＋と−・1/2 と √3/2・解の 一部
+const RLO = [-12, -6, -4, -3, 3, 4, 6];   // 範囲の はじまり（−π・−π/2・−π/3・−π/4・π/4・π/3・π/2）
+const thRange = lo => angStr12(lo) + ' ≦ θ ＜ ' + angStr12(lo + 24);
+const rangeCands = (fn, lo, v) => shiftCands(fn, lo, v);   // はずれの 作りは ずれの 方程式と おなじ
 // 方程式の 4択（計算させず 判断だけ）：θ ＋ a ＝ t の 値を えらぶ。
 //   正解（a ≦ t ＜ a ＋ 2π で さがす）・範囲を ずらし わすれた（0 ≦ t ＜ 2π で さがした）・＋と−が 逆・1/2 と √3/2・解の 一部
 function shiftCands(fn, a, v) {
@@ -516,8 +521,10 @@ function genPrm(lv, kind, rng, opt) {
   }
   if (lv === 6) {
     const fn = pick(rng, ['sin', 'cos']), a = pick(rng, SHIFTS), t = rng();
-    if (t < 0.3) return { mode: 'shiftWhich', fn, a };
-    if (t < 0.55) return { mode: 'shiftRange', fn, a };
+    // まず 範囲だけ 変える 練習（多め）→ ずれた グラフ → t の 範囲 → t の 値
+    if (t < 0.35) for (;;) { const lo = pick(rng, RLO), v = pick(rng, SVALS), c = rangeCands(fn, lo, v); if (c.length >= 4 && c.some(x => x[1][0] === 'range')) return { mode: 'rangeEq', fn, r: lo, v }; }
+    if (t < 0.55) return { mode: 'shiftWhich', fn, a };
+    if (t < 0.75) return { mode: 'shiftRange', fn, a };
     for (;;) { const v = pick(rng, SVALS); if (shiftCands(fn, a, v).length >= 4) return { mode: 'shiftEq', fn, a, v }; }
   }
   if (lv === 4) return { mode: 'signArea', fn: pick(rng, FNS), s: rng() < 0.5 ? 1 : -1 };
@@ -558,6 +565,11 @@ function makeOptions(p, rng) {
   }
   if (q.mode === 'shiftRange') {
     for (const [lo, hi, t] of [[q.a, q.a + 24, []], [0, 24, ['noshift']], [-q.a, 24 - q.a, ['sign']], [q.a, 24, ['half']]]) out.push({ key: lo + ',' + hi, text: rangeText(lo, hi), types: t, correct: !t.length });
+    return shuffle(rng, out);
+  }
+  if (q.mode === 'rangeEq') {   // 「いつもの 0〜2π で さがした」は かならず 入れる
+    const cs = rangeCands(q.fn, q.r, q.v), first = cs.slice(0, 1).concat(cs.filter(x => x[1][0] === 'range'));
+    first.concat(cs.filter(x => !first.includes(x))).slice(0, 4).forEach(([S, t]) => out.push({ key: S.join(), text: solsText(S), sols: S, types: t, correct: !t.length }));
     return shuffle(rng, out);
   }
   if (q.mode === 'shiftEq') {
@@ -602,9 +614,9 @@ function build(lv, kind, prm, rng, opt = {}) {
   const q = prm;
   // 窓（グラフを見せる θ の範囲）
   // ずれの 方程式は 横軸を t（a 〜 a ＋ 2π）に する
-  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : ['signArea', 'shiftRange'].includes(q.mode) ? WIN2 : q.mode === 'shiftEq' ? [q.a / 3, q.a / 3 + 8] : q.mode === 'tick' ? WIN_T : WIN3;
+  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : ['signArea', 'shiftRange'].includes(q.mode) ? WIN2 : q.mode === 'shiftEq' ? [q.a / 3, q.a / 3 + 8] : q.mode === 'rangeEq' ? [q.r / 3, q.r / 3 + 8] : q.mode === 'tick' ? WIN_T : WIN3;
   p.examT = !!opt.boss;
-  if (['which', 'pick', 'perAsk', 'tick', 'shiftWhich', 'shiftRange', 'shiftEq'].includes(q.mode)) p.options = makeOptions(p, rng);
+  if (['which', 'pick', 'perAsk', 'tick', 'shiftWhich', 'shiftRange', 'shiftEq', 'rangeEq'].includes(q.mode)) p.options = makeOptions(p, rng);
   if (q.mode === 'tick') {
     p.fig = tickFig(q.fn, q.u); p.askKey = askKey(q, p.fig);
     // 中ボス・大ボスは 問題集の ように 目盛りを ぜんぶ 文字で 見せて、その 1つを きく
@@ -624,6 +636,7 @@ function build(lv, kind, prm, rng, opt = {}) {
     perAsk: ['▼ この グラフの しゅうきは？', '？'],
     tick: ['▼ グラフの 目盛りを よめ', q.fn ? fnLabel(q.fn) + ' の グラフ。目盛り ？ の 値は？' : ''],
     shiftWhich: ['▼ この グラフの 式は？', '？'],
+    rangeEq: ['▼ 範囲に 気をつけて', q.v ? q.fn + 'θ ＝ ' + q.v + '（' + thRange(q.r) + '）の とき θ は？' : ''],
     shiftRange: ['▼ t の 範囲は？', q.a ? argStr(q.a) + ' ＝ t と おく。0 ≦ θ ＜ 2π の とき t の 範囲は？' : ''],
     shiftEq: ['▼ グラフで えらべ', q.v ? shFn(q.fn, q.a) + ' ＝ ' + q.v + '（0 ≦ θ ＜ 2π）。' + argStr(q.a) + ' の 値は？' : ''],
     signArea: ['▼ 0 ≦ θ ≦ 2π で ぬれ', q.fn ? q.fn + 'θ ' + opStr(q.s) + ' 0 の ところ' : ''],
@@ -640,6 +653,7 @@ function build(lv, kind, prm, rng, opt = {}) {
       perAsk: ['次の グラフで 表される 関数の 周期を 求めよ。'],
       tick: ['図は 関数 ' + F + ' の グラフ である。図中の 目盛り ' + QL + ' の 値を 求めよ。'],
       shiftWhich: ['次の グラフは ' + F + ' の グラフを θ軸方向に 平行移動 した もの である。この グラフの 式を 次から 選べ。'],
+      rangeEq: q.v ? [thRange(q.r) + ' の とき、方程式 ' + q.fn + 'θ ＝ ' + q.v + ' を 解け。'] : [''],
       shiftRange: q.a ? ['方程式 ' + shFn(q.fn, q.a) + ' ＝ 1/2（0 ≦ θ ＜ 2π）を 解く ため、' + argStr(q.a) + ' ＝ t と おく。t の とりうる 値の 範囲を 求めよ。'] : [''],
       shiftEq: q.v ? ['0 ≦ θ ＜ 2π の とき、方程式 ' + shFn(q.fn, q.a) + ' ＝ ' + q.v + ' を 解く。' + argStr(q.a) + ' ＝ t と おく とき、t の 値を すべて 求めよ。'] : [''],
       signArea: ['0 ≦ θ ≦ 2π の 範囲で、' + (q.fn || '') + 'θ ' + opStr(q.s) + ' 0 と なる θ の 範囲を グラフから 求めよ。'],
@@ -690,13 +704,13 @@ function classify(p, ans) {
 }
 const TYPE_TEXT = {
   len: '1/2 と √3/2（ひくい・たかい）が いれかわっている',
-  noshift: 'ずれ（θ ＋ a の a）を わすれた', range: 't の 範囲（a ≦ t ＜ a ＋ 2π）を ずらし わすれた／0 ≦ θ ＜ 2π に 入らない', amount: 'ずれの 大きさが ちがう', peak: '山（いちばん うえ）と 谷（いちばん した）を とりちがえた',
+  noshift: 'ずれ（θ ＋ a の a）を わすれた', range: 'いつもの 0 〜 2π で さがした（範囲が ずれている）', amount: 'ずれの 大きさが ちがう', peak: '山（いちばん うえ）と 谷（いちばん した）を とりちがえた',
   swap: 'sin と cos が いれかわっている', tan: 'tan と sin・cos を とりちがえた', amp: 'たかさ（ふりはば）が ちがう',
   period: 'しゅうき（くりかえしの はば）が ちがう',
   minimal: 'くりかえしの はばでは あるけど、いちばん 小さく ない', asym: '0 に なる ところと 値が ない ところ（漸近線）を とりちがえた',
   sign: '＋ と − が はんたい', half: 'まだ ほかにも ある', scatter: 'えらびかたが ばらばら',
 };
-const MASTER_TEXT = { noshift: 'ずれを 入れる', range: 't の 範囲', amount: 'ずれの 大きさ', peak: '山 と 谷', len: '1/2 と √3/2', minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
+const MASTER_TEXT = { noshift: 'ずれを 入れる', range: '範囲で さがす', amount: 'ずれの 大きさ', peak: '山 と 谷', len: '1/2 と √3/2', minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
 function describe(p, cls) { return cls.types.map(t => (t === 'scatter' && p.options ? 'ちがう ものを えらんだ' : TYPE_TEXT[t])).join('、'); }
 function masterText(t) { return MASTER_TEXT[t]; }
 
@@ -711,6 +725,13 @@ function reasonLines(p, QL) {
     L.push(q.fn === 'tan' ? '2π や 4π でも もとに もどるが、周期は いちばん 小さい π' : '4π でも もとに もどるが、周期は いちばん 小さい 2π');
     if (q.mode === 'period') L.push('→ θ ＝ ' + angStr(q.start) + ' から ' + angStr(q.start + PERIOD[q.fn]) + ' まで');
     else L.push('→ ' + fnLabel(q.fn) + ' の しゅうきは ' + angStr(PERIOD[q.fn]));
+  }
+  if (q.mode === 'rangeEq') {
+    // 0 〜 2π の 解の うち 範囲の 外の ものと、2π ずらして 範囲に 入れた もの
+    const right = solveU(q.fn, q.v, q.r, q.r + 24), out0 = solveU(q.fn, q.v, 0, 24).find(u => !right.includes(u));
+    L.push('範囲は ' + thRange(q.r) + '（0 〜 2π では ない）');
+    L.push('この 範囲で y ＝ ' + q.v + ' との 交点 → ' + solsText(right));
+    if (out0 !== undefined) L.push(angStr12(out0) + ' と ' + angStr12(right.includes(out0 + 24) ? out0 + 24 : out0 - 24) + ' は 2π ちがいで おなじ 値。範囲の 中を えらぶ');
   }
   if (q.mode === 'shiftWhich') {
     L.push('y ＝ ' + q.fn + '(θ ＋ a) は y ＝ ' + q.fn + 'θ を θ軸方向に −a ずらした グラフ（＋ なら 左へ、− なら 右へ）');
@@ -767,10 +788,10 @@ function likeOK(q, m, types) {
     if (t === 'tan' && !['which', 'pick'].includes(q.mode) && q.fn !== m.fn) return false;   // 種類の問題なら どの関数でも
     if (t === 'amp' && !(q.mode === 'pick' && q.variant === 'amp')) return false;           // 振幅 → 振幅を変えた絵の4択
     if ((t === 'period' || t === 'minimal') && q.mode === 'period' && q.fn !== m.fn) return false;              // 塗る問題は同じ関数、「周期は？」は どれでも
-    if (t === 'half' && !['zeros', 'shiftRange', 'shiftEq'].includes(q.mode)) return false;
+    if (t === 'half' && !['zeros', 'shiftRange', 'shiftEq', 'rangeEq'].includes(q.mode)) return false;
     if (t === 'asym' && q.fn !== 'tan') return false;
     if (t === 'sign' && q.fn !== m.fn) return false;
-    if (t === 'len' && (q.fn !== m.fn || !lenSwapV(q.mode === 'shiftEq' ? q.v : (valU(q.fn, q.u) || '')))) return false;
+    if (t === 'len' && (q.fn !== m.fn || !lenSwapV(q.mode === 'shiftEq' || q.mode === 'rangeEq' ? q.v : (valU(q.fn, q.u) || '')))) return false;
     if (q.mode === 'tick' && q.ask !== m.ask) return false;   // 目盛りは おなじ ききかたで
   }
   return true;
@@ -785,7 +806,8 @@ function clash(a, b) {
   if (a.mode === 'period' && b.mode === 'period') return a.start === b.start;
   if (a.mode === 'tick') return a.ask === b.ask && tickAns(a) === tickAns(b);
   if (a.mode === 'shiftWhich' || a.mode === 'shiftRange') return a.a === b.a;
-  if (a.mode === 'shiftEq') return a.a === b.a && a.v === b.v;   // おなじ ことを きく 問題
+  if (a.mode === 'shiftEq') return a.a === b.a && a.v === b.v;
+  if (a.mode === 'rangeEq') return a.r === b.r && a.v === b.v;   // おなじ ことを きく 問題
   if (a.mode === 'signArea') return a.s === b.s;
   if (a.mode === 'zeros') return a.what === b.what;
   return true;
@@ -1140,21 +1162,25 @@ function drawShiftFront(ctx, v, d, q) {
     ctx.fillStyle = YEL; ctx.font = 'bold ' + (13 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
     ctx.fillText(q.options.find(o => o.correct).text, v.W - 6 * d, 4 * d);
   }
-  if (q.mode !== 'shiftEq') return;
+  if (q.mode !== 'shiftEq' && q.mode !== 'rangeEq') return;
+  const isT = q.mode === 'shiftEq', lo = isT ? m.a : m.r;   // 横軸：t（ずれ）か θ（範囲だけ）
   const yv = C.numV(m.v), Y = VY(v, yv);
   ctx.strokeStyle = 'rgba(127,232,255,0.9)'; ctx.lineWidth = 1.6 * d; ctx.setLineDash([6 * d, 4 * d]);
   ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(v.W, Y); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = '#7fe8ff'; ctx.font = (11 * d) + 'px serif'; ctx.textAlign = 'left'; ctx.textBaseline = yv >= 0 ? 'bottom' : 'top';
   ctx.fillText('y ＝ ' + m.v, 6 * d, Y + (yv >= 0 ? -2 : 2) * d);
-  // 横軸は t：はしに「t」と 範囲（a 〜 a ＋ 2π）
-  ctx.fillStyle = gameEl.classList.contains('boss-final') ? '#1a1404' : gameEl.classList.contains('boss-mid') ? '#1c0610' : '#000a18';
-  ctx.fillRect(v.W - 16 * d, VY(v, 0) - 18 * d, 14 * d, 16 * d);
-  ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'italic ' + (12 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
-  ctx.fillText('t', v.W - 3 * d, VY(v, 0) - 2 * d);
+  // 横軸が t の ときは はしに「t」。右上に 範囲
+  if (isT) {
+    ctx.fillStyle = gameEl.classList.contains('boss-final') ? '#1a1404' : gameEl.classList.contains('boss-mid') ? '#1c0610' : '#000a18';
+    ctx.fillRect(v.W - 16 * d, VY(v, 0) - 18 * d, 14 * d, 16 * d);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'italic ' + (12 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+    ctx.fillText('t', v.W - 3 * d, VY(v, 0) - 2 * d);
+  }
+  const x = isT ? 't' : 'θ';
   ctx.fillStyle = '#7fe8ff'; ctx.font = (11 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
-  ctx.fillText(C.angStr12(m.a) + ' ≦ t ＜ ' + C.angStr12(m.a + 24), v.W - 6 * d, 4 * d);
+  ctx.fillText(C.angStr12(lo) + ' ≦ ' + x + ' ＜ ' + C.angStr12(lo + 24), v.W - 6 * d, 4 * d);
   if (!state.reveal) return;
-  C.solveU(m.fn, m.v, m.a, m.a + 24).forEach(u => {
+  C.solveU(m.fn, m.v, lo, lo + 24).forEach(u => {
     const x = VX(v, u / 3);
     ctx.strokeStyle = YEL; ctx.lineWidth = 1.2 * d; ctx.setLineDash([3 * d, 3 * d]); ctx.beginPath(); ctx.moveTo(x, Y); ctx.lineTo(x, VY(v, 0)); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = YEL; ctx.beginPath(); ctx.arc(x, Y, 5 * d, 0, Math.PI * 2); ctx.fill();
@@ -1242,7 +1268,7 @@ function draw() {
   if (state.tut && state.tut.step === 'tap' && state.blinkOn) tutBlink(ctx, v, q);
   // グラフ（逆向きの「周期」と順方向は同じ絵。漸近線の問題では点線を描かない）
   const showCurve = q.mode !== 'pick';
-  const SH = ['shiftWhich', 'shiftRange', 'shiftEq'].includes(q.mode);
+  const SH = ['shiftWhich', 'shiftRange', 'shiftEq', 'rangeEq'].includes(q.mode);
   if (SH) drawShiftBack(ctx, v, d, q);
   if (showCurve) drawCurve(ctx, v, { fn: m.fn, ph: SH && q.mode !== 'shiftEq' ? m.a : 0 }, d, '#fff', 2.2, !(q.mode === 'zeros' && m.what === 'asym' && vk === 'ask'));
   if (SH) drawShiftFront(ctx, v, d, q);
