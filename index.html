@@ -263,7 +263,7 @@ letter-spacing: 4px; z-index: 20; animation: lvUp 1.8s forwards; pointer-events:
     <p style="margin-top:24px;">なみの かたちを みきわめ<br>モンスターを うちたおせ！</p>
     <button class="start-btn" id="startBtn">▶ はじめる</button>
     <button class="how-btn" id="howBtn">？ あそびかた</button>
-    <p class="sub" style="margin-top:20px;font-size:10px;">5つの 章（どこからでも）→ さいごの 章</p>
+    <p class="sub" style="margin-top:20px;font-size:10px;">6つの 章（どこからでも）→ さいごの 章</p>
   </div>
 
   <div class="overlay hidden" id="tutDoneScreen">
@@ -439,6 +439,25 @@ for (const fn of ['sin', 'cos']) {
   }
 }
 const ASKS = ['peakY', 'peakT', 'zero', 'valAt', 'mirror'];
+// ---------- 位相の ずれ（第6章）：y ＝ fn(θ ＋ a)、a は π/12 単位 ----------
+//   shiftWhich { fn, a } グラフ → 式 ｜ shiftRange { fn, a } θ ＋ a ＝ t の 範囲 ｜ shiftEq { fn, a, v } 方程式の 解
+const SHIFTS = [2, 3, 4, -2, -3, -4];                                  // ±π/6・±π/4・±π/3
+const SVALS = ['1/2', '√2/2', '√3/2', '0', MINUS + '1/2', MINUS + '√2/2', MINUS + '√3/2'];
+const argStr = a => 'θ ' + (a > 0 ? '＋ ' : MINUS + ' ') + angStr12(Math.abs(a));
+const shFn = (fn, a) => (a === 0 ? fn + 'θ' : fn + '(' + argStr(a) + ')');
+function solveU(fn, v, lo, hi) { const out = []; for (let u = lo; u < hi; u++) if (valU(fn, u) === v) out.push(u); return out; }
+const shiftSols = (fn, a, v) => solveU(fn, v, a, a + 24).map(t => t - a).sort((x, y) => x - y);   // 0 ≦ θ ＜ 2π の 解
+const solsText = S => 'θ ＝ ' + S.map(angStr12).join('、');
+const rangeText = (lo, hi) => angStr12(lo) + ' ≦ t ＜ ' + angStr12(hi);
+// 方程式の 4択：正解・ずれを わすれた・ずらす 向きが 逆・範囲の 外を まぜた（t を 0〜2π で さがして a を ひいた）・解の 一部
+function shiftCands(fn, a, v) {
+  const right = shiftSols(fn, a, v), c = [[right, []]];
+  c.push([solveU(fn, v, 0, 24), ['noshift']], [shiftSols(fn, -a, v), ['sign']], [solveU(fn, v, 0, 24).map(t => t - a).sort((x, y) => x - y), ['range']]);
+  if (right.length > 1) c.push([right.slice(0, 1), ['half']], [right.slice(1), ['half']]);
+  const seen = [], out = [];
+  for (const [S, t] of c) { const k = JSON.stringify(S); if (S.length && !seen.includes(k)) { seen.push(k); out.push([S, t]); } }
+  return out;
+}
 const askKey = (q, f) => ({ peakY: valU(q.fn, f.s) === '1' ? 'top' : 'bot', peakT: 's', zero: 'z', valAt: 'e', mirror: 'b' }[q.ask]);
 function tickAns(q) {   // 値（文字）か θ（u）
   const f = tickFig(q.fn, q.u);
@@ -473,6 +492,12 @@ function genPrm(lv, kind, rng, opt) {
     const us = opt.boss ? TICK_U[fn].filter(u => Math.abs(u - extNear(fn, u)) >= 3) : TICK_U[fn];
     return { mode: 'tick', fn, u: pick(rng, us), ask: pick(rng, ['peakY', 'peakT', 'zero', 'valAt', 'valAt', 'mirror', 'mirror']) };
   }
+  if (lv === 6) {
+    const fn = pick(rng, ['sin', 'cos']), a = pick(rng, SHIFTS), t = rng();
+    if (t < 0.3) return { mode: 'shiftWhich', fn, a };
+    if (t < 0.55) return { mode: 'shiftRange', fn, a };
+    for (;;) { const v = pick(rng, SVALS); if (shiftCands(fn, a, v).length >= 4) return { mode: 'shiftEq', fn, a, v }; }
+  }
   if (lv === 4) return { mode: 'signArea', fn: pick(rng, FNS), s: rng() < 0.5 ? 1 : -1 };
   const fn = pick(rng, FNS);
   return { mode: 'zeros', fn, what: fn === 'tan' && rng() < 0.5 ? 'asym' : 'zero' };
@@ -503,6 +528,19 @@ function makeOptions(p, rng) {
       out.push({ key: String(w), text: angStr(w), types, correct: w === right });
     }
     return out;   // 小さい順
+  }
+  if (q.mode === 'shiftWhich') {
+    const a2 = pick(rng, SHIFTS.filter(x => Math.sign(x) === Math.sign(q.a) && x !== q.a));
+    for (const [a, t] of [[q.a, []], [-q.a, ['sign']], [a2, ['amount']], [0, ['noshift']]]) out.push({ key: String(a), text: 'y ＝ ' + shFn(q.fn, a), types: t, correct: !t.length });
+    return shuffle(rng, out);
+  }
+  if (q.mode === 'shiftRange') {
+    for (const [lo, hi, t] of [[q.a, q.a + 24, []], [0, 24, ['noshift']], [-q.a, 24 - q.a, ['sign']], [q.a, 24, ['half']]]) out.push({ key: lo + ',' + hi, text: rangeText(lo, hi), types: t, correct: !t.length });
+    return shuffle(rng, out);
+  }
+  if (q.mode === 'shiftEq') {
+    shiftCands(q.fn, q.a, q.v).slice(0, 4).forEach(([S, t]) => out.push({ key: S.join(), text: solsText(S), sols: S, types: t, correct: !t.length }));
+    return shuffle(rng, out);
   }
   if (q.mode === 'tick') {
     // 正解と「判断が1つだけ違う」ものを先に、足りなければ 同じ なかまで うめる
@@ -540,8 +578,8 @@ function build(lv, kind, prm, rng, opt = {}) {
   const p = { lv, kind, prm, mode: prm.mode };
   const q = prm;
   // 窓（グラフを見せる θ の範囲）
-  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : q.mode === 'signArea' ? WIN2 : q.mode === 'tick' ? WIN_T : WIN3;
-  if (['which', 'pick', 'perAsk', 'tick'].includes(q.mode)) p.options = makeOptions(p, rng);
+  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : ['signArea', 'shiftRange', 'shiftEq'].includes(q.mode) ? WIN2 : q.mode === 'tick' ? WIN_T : WIN3;
+  if (['which', 'pick', 'perAsk', 'tick', 'shiftWhich', 'shiftRange', 'shiftEq'].includes(q.mode)) p.options = makeOptions(p, rng);
   if (q.mode === 'tick') {
     p.fig = tickFig(q.fn, q.u); p.askKey = askKey(q, p.fig);
     // 中ボス・大ボスは 問題集の ように 目盛りを ぜんぶ 文字で 見せて、その 1つを きく
@@ -560,6 +598,9 @@ function build(lv, kind, prm, rng, opt = {}) {
     period: ['▼ 1しゅうきぶん ぬれ', q.fn ? fnLabel(q.fn) + ' を θ ＝ ' + angStr(q.start || 0) + ' から' : ''],
     perAsk: ['▼ この グラフの しゅうきは？', '？'],
     tick: ['▼ グラフの 目盛りを よめ', q.fn ? fnLabel(q.fn) + ' の グラフ。目盛り ？ の 値は？' : ''],
+    shiftWhich: ['▼ この グラフの 式は？', '？'],
+    shiftRange: ['▼ t の 範囲は？', q.a ? argStr(q.a) + ' ＝ t と おく。0 ≦ θ ＜ 2π の とき t の 範囲は？' : ''],
+    shiftEq: ['▼ グラフで 解け', q.v ? shFn(q.fn, q.a) + ' ＝ ' + q.v + '（0 ≦ θ ＜ 2π）の 解は？' : ''],
     signArea: ['▼ 0 ≦ θ ≦ 2π で ぬれ', q.fn ? q.fn + 'θ ' + opStr(q.s) + ' 0 の ところ' : ''],
     zeros: ['▼ −π ≦ θ ≦ 2π で ぜんぶ えらべ', q.fn ? (q.what === 'asym' ? fnLabel(q.fn) + ' の 漸近線' : fnLabel(q.fn) + ' が 0 に なる θ') : ''],
   }[q.mode];
@@ -573,6 +614,9 @@ function build(lv, kind, prm, rng, opt = {}) {
       period: [F + ' の グラフで、θ ＝ ' + angStr(q.start || 0) + ' から 1周期分の 区間を 示せ。'],
       perAsk: ['次の グラフで 表される 関数の 周期を 求めよ。'],
       tick: ['図は 関数 ' + F + ' の グラフ である。図中の 目盛り ' + QL + ' の 値を 求めよ。'],
+      shiftWhich: ['次の グラフは ' + F + ' の グラフを θ軸方向に 平行移動 した もの である。この グラフの 式を 次から 選べ。'],
+      shiftRange: q.a ? ['方程式 ' + shFn(q.fn, q.a) + ' ＝ 1/2（0 ≦ θ ＜ 2π）を 解く ため、' + argStr(q.a) + ' ＝ t と おく。t の とりうる 値の 範囲を 求めよ。'] : [''],
+      shiftEq: q.v ? ['0 ≦ θ ＜ 2π の とき、方程式 ' + shFn(q.fn, q.a) + ' ＝ ' + q.v + ' を 解け。'] : [''],
       signArea: ['0 ≦ θ ≦ 2π の 範囲で、' + (q.fn || '') + 'θ ' + opStr(q.s) + ' 0 と なる θ の 範囲を グラフから 求めよ。'],
       zeros: q.what === 'asym' ? ['−π ≦ θ ≦ 2π の 範囲で、' + F + ' の グラフの 漸近線を すべて 求めよ。']
                                : ['−π ≦ θ ≦ 2π の 範囲で、' + F + ' の グラフと θ軸との 共有点の θ座標を すべて 求めよ。'],
@@ -620,13 +664,14 @@ function classify(p, ans) {
   }
 }
 const TYPE_TEXT = {
-  len: '1/2 と √3/2（ひくい・たかい）が いれかわっている', peak: '山（いちばん うえ）と 谷（いちばん した）を とりちがえた',
+  len: '1/2 と √3/2（ひくい・たかい）が いれかわっている',
+  noshift: 'ずれ（θ ＋ a の a）を わすれた', range: '0 ≦ θ ＜ 2π に 入らない 解が まざっている（または たりない）', amount: 'ずれの 大きさが ちがう', peak: '山（いちばん うえ）と 谷（いちばん した）を とりちがえた',
   swap: 'sin と cos が いれかわっている', tan: 'tan と sin・cos を とりちがえた', amp: 'たかさ（ふりはば）が ちがう',
   period: 'しゅうき（くりかえしの はば）が ちがう',
   minimal: 'くりかえしの はばでは あるけど、いちばん 小さく ない', asym: '0 に なる ところと 値が ない ところ（漸近線）を とりちがえた',
   sign: '＋ と − が はんたい', half: 'まだ ほかにも ある', scatter: 'えらびかたが ばらばら',
 };
-const MASTER_TEXT = { peak: '山 と 谷', len: '1/2 と √3/2', minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
+const MASTER_TEXT = { noshift: 'ずれを 入れる', range: 'θ の 範囲', amount: 'ずれの 大きさ', peak: '山 と 谷', len: '1/2 と √3/2', minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
 function describe(p, cls) { return cls.types.map(t => (t === 'scatter' && p.options ? 'ちがう ものを えらんだ' : TYPE_TEXT[t])).join('、'); }
 function masterText(t) { return MASTER_TEXT[t]; }
 
@@ -641,6 +686,20 @@ function reasonLines(p, QL) {
     L.push(q.fn === 'tan' ? '2π や 4π でも もとに もどるが、周期は いちばん 小さい π' : '4π でも もとに もどるが、周期は いちばん 小さい 2π');
     if (q.mode === 'period') L.push('→ θ ＝ ' + angStr(q.start) + ' から ' + angStr(q.start + PERIOD[q.fn]) + ' まで');
     else L.push('→ ' + fnLabel(q.fn) + ' の しゅうきは ' + angStr(PERIOD[q.fn]));
+  }
+  if (q.mode === 'shiftWhich') {
+    L.push('y ＝ ' + q.fn + '(θ ＋ a) は y ＝ ' + q.fn + 'θ を θ軸方向に −a ずらした グラフ（＋ なら 左へ、− なら 右へ）');
+    L.push('→ ' + (q.a > 0 ? '左' : '右') + 'へ ' + angStr12(Math.abs(q.a)) + ' ずれている → y ＝ ' + shFn(q.fn, q.a));
+  }
+  if (q.mode === 'shiftRange') {
+    L.push('0 ≦ θ ＜ 2π の 両はしに ' + (q.a > 0 ? '' : MINUS) + angStr12(Math.abs(q.a)) + ' を たす');
+    L.push('→ ' + rangeText(q.a, q.a + 24));
+  }
+  if (q.mode === 'shiftEq') {
+    const ts = solveU(q.fn, q.v, q.a, q.a + 24);
+    L.push('t ＝ ' + argStr(q.a) + ' と おくと ' + rangeText(q.a, q.a + 24) + '。この 範囲で ' + q.fn + ' t ＝ ' + q.v + ' と なる t は ' + ts.map(angStr12).join('、'));
+    L.push('θ ＝ t ' + (q.a > 0 ? MINUS + ' ' : '＋ ') + angStr12(Math.abs(q.a)) + ' → ' + solsText(shiftSols(q.fn, q.a, q.v)));
+    L.push('グラフでは y ＝ ' + q.v + ' の 横線と まじわる ところ');
   }
   if (q.mode === 'tick') {
     const f = p.fig, A = angStr12, ans = tickAns(q);
@@ -683,7 +742,7 @@ function likeOK(q, m, types) {
     if (t === 'tan' && !['which', 'pick'].includes(q.mode) && q.fn !== m.fn) return false;   // 種類の問題なら どの関数でも
     if (t === 'amp' && !(q.mode === 'pick' && q.variant === 'amp')) return false;           // 振幅 → 振幅を変えた絵の4択
     if ((t === 'period' || t === 'minimal') && q.mode === 'period' && q.fn !== m.fn) return false;              // 塗る問題は同じ関数、「周期は？」は どれでも
-    if (t === 'half' && q.mode !== 'zeros') return false;
+    if (t === 'half' && !['zeros', 'shiftRange', 'shiftEq'].includes(q.mode)) return false;
     if (t === 'asym' && q.fn !== 'tan') return false;
     if (t === 'sign' && q.fn !== m.fn) return false;
     if (t === 'len' && (q.fn !== m.fn || !lenSwapV(valU(q.fn, q.u) || ''))) return false;
@@ -699,14 +758,16 @@ function clash(a, b) {
   if (a.mode === 'which' && b.mode === 'which') return a.w0 === b.w0;
   if (a.mode === 'pick' && b.mode === 'pick') return a.variant === b.variant;   // はずれの絵がちがえば別の問題
   if (a.mode === 'period' && b.mode === 'period') return a.start === b.start;
-  if (a.mode === 'tick') return a.ask === b.ask && tickAns(a) === tickAns(b);   // おなじ ことを きく 問題
+  if (a.mode === 'tick') return a.ask === b.ask && tickAns(a) === tickAns(b);
+  if (a.mode === 'shiftWhich' || a.mode === 'shiftRange') return a.a === b.a;
+  if (a.mode === 'shiftEq') return a.a === b.a && a.v === b.v;   // おなじ ことを きく 問題
   if (a.mode === 'signArea') return a.s === b.s;
   if (a.mode === 'zeros') return a.what === b.what;
   return true;
 }
 // ---------- 章・ダメージ・HP ----------
 // 各章：ザコ2体（1体は逆向き。逆向きは かたち・周期の 章だけ）→ 中ボス（問題集の 言い回し）
-// 5章 すべて クリアで さいごの 章：大ボス（5つの 単元を 問題集の 言い回しで。全部 出すまで たおれない）
+// 6章 すべて クリアで さいごの 章：大ボス（6つの 単元を 問題集の 言い回しで。全部 出すまで たおれない）
 const NORMAL = 2;
 const CHAPTERS = [
   { ch: 1, lv: 1, title: '第1章 かたち', enemy: { name: 'ナミガタ', sprite: '〰️' }, boss: { name: 'カタチノヌシ', sprite: '🐚' } },
@@ -714,13 +775,14 @@ const CHAPTERS = [
   { ch: 3, lv: 3, title: '第3章 あたい', enemy: { name: 'ヨミトリ', sprite: '🦉' }, boss: { name: 'アタイノヌシ', sprite: '🔭' } },
   { ch: 4, lv: 4, title: '第4章 ＋ と −', enemy: { name: 'プラマイ', sprite: '⚖️' }, boss: { name: 'プラマイオウ', sprite: '🦂' } },
   { ch: 5, lv: 5, title: '第5章 0 と 漸近線', enemy: { name: 'ゼロノフチ', sprite: '🕳️' }, boss: { name: 'ゼロノヌシ', sprite: '🌑' } },
-  { ch: 6, final: true, title: 'さいごの 章', boss: { name: 'オオナミ', sprite: '🌊' } },
+  { ch: 6, lv: 6, title: '第6章 ずれ', enemy: { name: 'ズレタン', sprite: '↔️' }, boss: { name: 'イソウノヌシ', sprite: '🎐' } },
+  { ch: 7, final: true, title: 'さいごの 章', boss: { name: 'オオナミ', sprite: '🌊' } },
 ];
 const HAS_REV = [1, 2];
 function chapterPlan(ch, rng) {
   const C = CHAPTERS[ch - 1];
   if (C.final) {
-    const lvs = shuffle(rng, [1, 2, 3, 4, 5]);
+    const lvs = shuffle(rng, CHAPTERS.filter(c => !c.final).map(c => c.lv));
     const rev = pick(rng, lvs.map((lv, i) => i).filter(i => HAS_REV.includes(lvs[i])));
     return { zako: [], boss: lvs.map((lv, i) => ({ lv, kind: i === rev ? 'rev' : 'fwd', boss: true })) };
   }
@@ -775,7 +837,7 @@ function record(ctx, p, ok, cls, ms) {
 }
 
 G.GraphCore = {
-  FNS, PERIOD, angStr, angStr12, val, valU, curve, numV, cellSign, isAsym, zerosOf, cellsIn, linesIn, WIN2, WIN3, WIN_T, TICK_U, tickFig, tickAns,
+  FNS, PERIOD, angStr, angStr12, val, valU, SHIFTS, shiftSols, solveU, curve, numV, cellSign, isAsym, zerosOf, cellsIn, linesIn, WIN2, WIN3, WIN_T, TICK_U, tickFig, tickAns,
   genPrm, build, judge, classify, describe, masterText, likeOK, clash,
   CHAPTERS, NORMAL, HAS_REV, chapterPlan, zakoHP, midHP, finalHP, CRIT, comboBonus, damage, newContext, makeProblem, record, mulberry32,
 };
@@ -814,6 +876,8 @@ const atBoss = () => state.stage === 'boss';
 // LV が 上がるのは「その周で はじめて クリアした 章」だけ。同じ周で 同じ章を くりかえしても 上がらない（均等に あそぶ）
 const MAX_LAP = 3;   // ★3つ（あと1周で そろう、と 思える 数）
 let memProg = null;
+const NORM = C.CHAPTERS.filter(c => !c.final).map(c => c.ch);   // ふつうの 章（1〜6）
+const FIN = C.CHAPTERS.find(c => c.final).ch;                     // さいごの 章
 function newProg() { return { lap: 1, cur: {}, gained: 0, stars: {} }; }
 function loadProg() {
   try {
@@ -821,7 +885,8 @@ function loadProg() {
     if (raw) {   // ★5 だった ころの きろくは 3 に そろえる
       const pr = JSON.parse(raw);
       if (pr.lap > MAX_LAP + 1) { pr.lap = MAX_LAP + 1; pr.cur = {}; }
-      pr.gained = Math.min(pr.gained, 5 * MAX_LAP);
+      pr.gained = Math.min(pr.gained, NORM.length * MAX_LAP);
+      if (!pr.v6) { if (pr.stars[6]) { pr.stars[FIN] = pr.stars[6]; delete pr.stars[6]; } pr.v6 = true; }   // 第6章（ずれ）を 足す まえの さいごの 章の ★
       Object.keys(pr.stars).forEach(k => { pr.stars[k] = Math.min(pr.stars[k], MAX_LAP); });
       return pr;
     }
@@ -829,7 +894,8 @@ function loadProg() {
     if (old) {
       const pr = newProg();
       [1, 2, 3, 4, 5].forEach(k => { if (old[k]) { pr.cur[k] = true; pr.gained++; pr.stars[k] = 1; } });
-      if (old[6]) { pr.stars[6] = 1; pr.lap = 2; pr.cur = {}; }
+      if (old[6]) { pr.stars[FIN] = 1; pr.lap = 2; pr.cur = {}; }
+      pr.v6 = true;
       return pr;
     }
   } catch (e) { /* 読めなければ メモリの きろく */ }
@@ -839,7 +905,7 @@ function saveProg(pr) { memProg = pr; try { localStorage.setItem('graph-progress
 const heroLV = () => 1 + loadProg().gained;
 const attack = L => L + 1;   // こうげき力 ＝ ザコの 問題の きほんダメージ（2 ＋ LV − 1）
 const isMaster = pr => pr.lap > MAX_LAP;
-const finalOpen = pr => isMaster(pr) || [1, 2, 3, 4, 5].every(k => pr.cur[k]);
+const finalOpen = pr => isMaster(pr) || NORM.every(k => pr.cur[k]);
 const p = () => state.problem;
 const tapMode = q => !!q && !q.options;
 
@@ -989,7 +1055,7 @@ function drawCurve(ctx, v, g, d, color, width, asymLines) {
   for (let i = 0; i <= N; i++) {
     const w = v.w0 + (v.w1 - v.w0) * i / N, t = w * Math.PI / 4;
     if (g.fn === 'tan' && Math.abs(Math.cos(t / per)) < 0.02) { pen = false; continue; }   // 漸近線ではつながない
-    const y = C.curve(g.fn, t, amp, per);
+    const y = C.curve(g.fn, t + (g.ph || 0) * Math.PI / 12, amp, per);   // ph：θ ＋ ph（π/12 単位）
     if (Math.abs(y) > v.ym * 1.15) { pen = false; continue; }
     if (pen) ctx.lineTo(VX(v, w), VY(v, y)); else { ctx.moveTo(VX(v, w), VY(v, y)); pen = true; }
   }
@@ -1013,6 +1079,39 @@ function drawThumb(cv, g) {
   drawCurve(ctx, v, g, d, '#fff', 2, true);
 }
 
+// ずれの 章：π/6 ごとの 細い 縦線。グラフ → 式 では もとの グラフを 点線で
+function drawShiftBack(ctx, v, d, q) {
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1 * d; ctx.setLineDash([3 * d, 3 * d]); ctx.beginPath();
+  for (let u = Math.ceil(v.w0 * 3); u <= v.w1 * 3; u += 2) { if (u % 6 === 0) continue; ctx.moveTo(VX(v, u / 3), 0); ctx.lineTo(VX(v, u / 3), v.H); }
+  ctx.stroke(); ctx.setLineDash([]);
+  if (q.mode === 'shiftWhich') {
+    ctx.setLineDash([5 * d, 4 * d]); drawCurve(ctx, v, { fn: q.prm.fn }, d, 'rgba(255,255,255,0.35)', 1.5, false); ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.font = (11 * d) + 'px serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('点線：y ＝ ' + q.prm.fn + 'θ', 6 * d, 4 * d);
+  }
+}
+// 方程式：y ＝ v の 横線。答えの ときは 交点（解）を きいろで
+function drawShiftFront(ctx, v, d, q) {
+  const m = q.prm, YEL = '#ffd84a';
+  if (state.reveal && q.mode === 'shiftWhich') {
+    ctx.fillStyle = YEL; ctx.font = 'bold ' + (13 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+    ctx.fillText(q.options.find(o => o.correct).text, v.W - 6 * d, 4 * d);
+  }
+  if (q.mode !== 'shiftEq') return;
+  const yv = C.numV(m.v), Y = VY(v, yv);
+  ctx.strokeStyle = 'rgba(127,232,255,0.9)'; ctx.lineWidth = 1.6 * d; ctx.setLineDash([6 * d, 4 * d]);
+  ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(v.W, Y); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#7fe8ff'; ctx.font = (11 * d) + 'px serif'; ctx.textAlign = 'left'; ctx.textBaseline = yv >= 0 ? 'bottom' : 'top';
+  ctx.fillText('y ＝ ' + m.v, 6 * d, Y + (yv >= 0 ? -2 : 2) * d);
+  if (!state.reveal) return;
+  C.shiftSols(m.fn, m.a, m.v).forEach(u => {
+    const x = VX(v, u / 3);
+    ctx.strokeStyle = YEL; ctx.lineWidth = 1.2 * d; ctx.setLineDash([3 * d, 3 * d]); ctx.beginPath(); ctx.moveTo(x, Y); ctx.lineTo(x, VY(v, 0)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = YEL; ctx.beginPath(); ctx.arc(x, Y, 5 * d, 0, Math.PI * 2); ctx.fill();
+    const str = C.angStr12(u), [nu, de] = str.includes('/') ? str.split('/') : [str, ''];
+    tickLabel(ctx, d, nu, de, x, yv >= 0 ? VY(v, 0) + 4 * d : VY(v, 0) - 4 * d - (de ? 21 : 11) * d);
+  });
+}
 // 目盛りの 問題の 図：点線と 目盛り（ザコは きく ところに ？、ボスは ぜんぶ 文字）
 function drawTicks(ctx, v, d, q) {
   const m = q.prm, f = q.fig, L = q.letters, YEL = '#ffd84a';
@@ -1093,7 +1192,10 @@ function draw() {
   if (state.tut && state.tut.step === 'tap' && state.blinkOn) tutBlink(ctx, v, q);
   // グラフ（逆向きの「周期」と順方向は同じ絵。漸近線の問題では点線を描かない）
   const showCurve = q.mode !== 'pick';
-  if (showCurve) drawCurve(ctx, v, { fn: m.fn }, d, '#fff', 2.2, !(q.mode === 'zeros' && m.what === 'asym' && vk === 'ask'));
+  const SH = ['shiftWhich', 'shiftRange', 'shiftEq'].includes(q.mode);
+  if (SH) drawShiftBack(ctx, v, d, q);
+  if (showCurve) drawCurve(ctx, v, { fn: m.fn, ph: SH ? m.a : 0 }, d, '#fff', 2.2, !(q.mode === 'zeros' && m.what === 'asym' && vk === 'ask'));
+  if (SH) drawShiftFront(ctx, v, d, q);
   // 縦線（0 になる θ・漸近線）
   if (q.answer && q.answer.lines) {
     const ls = vk === 'ans' ? q.answer.lines : state.sel.lines;
@@ -1208,9 +1310,9 @@ function onCorrect(ev) {
   state.combo = (state.combo || 0) + 1;
   const hit = C.damage(q, heroLV(), ev, rng, state.combo);
   state.phase = 'busy'; state.reveal = true; state.hp -= hit.d;
-  // 大ボスは 5つの 単元を 出しきるまで たおれない
+  // 大ボスは すべての 単元を 出しきるまで たおれない
   let hold = false;
-  if (c.final && loadProg().lap === 1 && state.hp <= 0 && state.fi < state.plan.boss.length - 1) { state.hp = 1; hold = true; }   // 1周目だけ 5つ ぜんぶ 出す
+  if (c.final && loadProg().lap === 1 && state.hp <= 0 && state.fi < state.plan.boss.length - 1) { state.hp = 1; hold = true; }   // 1周目だけ ぜんぶ 出す
   draw(); renderControls(); renderStatus();
   flashScreen(); if (hit.crit) setTimeout(flashScreen, 180);
   monsterAnim('hit'); showDamage('-' + hit.d, hit.crit ? '#ff9900' : '#ffff00');
@@ -1259,15 +1361,15 @@ function chapterClear() {
       lines.push('LEVEL UP！　LV ' + before + ' → ' + (before + 1) + '　こうげき力 ' + attack(before) + ' → ' + attack(before + 1));
       showLevelUp();
     } else if (!isMaster(pr)) lines.push('（この 周では もう クリアずみ。ほかの 章を クリアすると LV が あがる）');
-    const n = [1, 2, 3, 4, 5].filter(k => pr.cur[k]).length;
-    lines.push(isMaster(pr) ? '👑 マスター' : pr.lap + '周目：クリアした 章 ' + n + '/5');
-    if (n === 5 && !isMaster(pr)) lines.push('さいごの 章が ひらいた！');
+    const n = NORM.filter(k => pr.cur[k]).length;
+    lines.push(isMaster(pr) ? '👑 マスター' : pr.lap + '周目：クリアした 章 ' + n + '/' + NORM.length);
+    if (n === NORM.length && !isMaster(pr)) lines.push('さいごの 章が ひらいた！');
   } else {
-    pr.stars[6] = Math.min(MAX_LAP, isMaster(pr) ? MAX_LAP : pr.lap);
+    pr.stars[FIN] = Math.min(MAX_LAP, isMaster(pr) ? MAX_LAP : pr.lap);
     const done = pr.lap;
     if (!isMaster(pr)) { pr.lap += 1; pr.cur = {}; }
     lines.push('GAME CLEAR!　' + Math.min(done, MAX_LAP) + '周目 クリア！');
-    lines.push(isMaster(pr) ? '👑 ★3 まで あつめた！ マスター！' : 'つぎは ' + pr.lap + '周目。5つの 章を もう いちど クリアしよう（LV も また あがる）');
+    lines.push(isMaster(pr) ? '👑 ★3 まで あつめた！ マスター！' : 'つぎは ' + pr.lap + '周目。' + NORM.length + 'つの 章を もう いちど クリアしよう（LV も また あがる）');
   }
   saveProg(pr);
   $('clearHero').textContent = c.boss.sprite;
@@ -1282,14 +1384,14 @@ function showMap() {
   const items = C.CHAPTERS.map(c => {
     const st = starStr(pr.stars[c.ch] || 0);
     const doneNow = c.final ? false : (isMaster(pr) || !!pr.cur[c.ch]);
-    if (c.final && !finalOpen(pr)) return '<button class="chap locked" disabled>🔒 さいごの 章' + st + '<span class="unit">この 周で 1〜5章を クリアで ひらく</span></button>';
+    if (c.final && !finalOpen(pr)) return '<button class="chap locked" disabled>🔒 さいごの 章' + st + '<span class="unit">この 周で 1〜' + NORM.length + '章を クリアで ひらく</span></button>';
     return '<button class="chap" data-ch="' + c.ch + '">' + (doneNow ? '✅ ' : '▶ ') + c.title + st + '<span class="unit">' +
-      (c.final ? 'ボス ' + c.boss.name + '（問題集の ことばで 5つの 単元）' : 'ザコ 2体 → 中ボス ' + c.boss.name) + '</span></button>';
-  }).join('') + (pr.stars[6] ? '<button class="chap reset" id="resetBtn2">🔄 1周目の LV 1 に もどって あそぶ</button>' : '');
+      (c.final ? 'ボス ' + c.boss.name + '（問題集の ことばで ' + NORM.length + 'つの 単元）' : 'ザコ 2体 → 中ボス ' + c.boss.name) + '</span></button>';
+  }).join('') + (pr.stars[FIN] ? '<button class="chap reset" id="resetBtn2">🔄 1周目の LV 1 に もどって あそぶ</button>' : '');
   $('mapLV').textContent = (isMaster(pr) ? '👑 マスター' : pr.lap + '周目') + '　ゆうしゃ LV ' + L + '　こうげき力 ' + attack(L);
   $('chapterList').innerHTML = items;
   $('chapterList').querySelectorAll('.chap[data-ch]').forEach(b => b.addEventListener('click', () => { $('mapScreen').classList.add('hidden'); state.ctx = C.newContext(); startChapter(+b.dataset.ch); }));
-  if (pr.stars[6]) $('resetBtn2').addEventListener('click', () => $('resetScreen').classList.remove('hidden'));
+  if (pr.stars[FIN]) $('resetBtn2').addEventListener('click', () => $('resetScreen').classList.remove('hidden'));
   $('mapScreen').classList.remove('hidden');
   state.phase = 'idle';
 }
