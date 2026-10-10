@@ -448,11 +448,15 @@ const shFn = (fn, a) => (a === 0 ? fn + 'θ' : fn + '(' + argStr(a) + ')');
 function solveU(fn, v, lo, hi) { const out = []; for (let u = lo; u < hi; u++) if (valU(fn, u) === v) out.push(u); return out; }
 const shiftSols = (fn, a, v) => solveU(fn, v, a, a + 24).map(t => t - a).sort((x, y) => x - y);   // 0 ≦ θ ＜ 2π の 解
 const solsText = S => 'θ ＝ ' + S.map(angStr12).join('、');
+const tText = (lhs, S) => lhs + ' ＝ ' + S.map(angStr12).join('、');
 const rangeText = (lo, hi) => angStr12(lo) + ' ≦ t ＜ ' + angStr12(hi);
-// 方程式の 4択：正解・ずれを わすれた・ずらす 向きが 逆・範囲の 外を まぜた（t を 0〜2π で さがして a を ひいた）・解の 一部
+// 方程式の 4択（計算させず 判断だけ）：θ ＋ a ＝ t の 値を えらぶ。
+//   正解（a ≦ t ＜ a ＋ 2π で さがす）・範囲を ずらし わすれた（0 ≦ t ＜ 2π で さがした）・＋と−が 逆・1/2 と √3/2・解の 一部
 function shiftCands(fn, a, v) {
-  const right = shiftSols(fn, a, v), c = [[right, []]];
-  c.push([solveU(fn, v, 0, 24), ['noshift']], [shiftSols(fn, -a, v), ['sign']], [solveU(fn, v, 0, 24).map(t => t - a).sort((x, y) => x - y), ['range']]);
+  const right = solveU(fn, v, a, a + 24), c = [[right, []]];
+  c.push([solveU(fn, v, 0, 24), ['range']]);
+  if (v !== '0') c.push([solveU(fn, flipSign(v), a, a + 24), ['sign']]);
+  if (lenSwapV(v)) c.push([solveU(fn, lenSwapV(v), a, a + 24), ['len']]);
   if (right.length > 1) c.push([right.slice(0, 1), ['half']], [right.slice(1), ['half']]);
   const seen = [], out = [];
   for (const [S, t] of c) { const k = JSON.stringify(S); if (S.length && !seen.includes(k)) { seen.push(k); out.push([S, t]); } }
@@ -539,7 +543,8 @@ function makeOptions(p, rng) {
     return shuffle(rng, out);
   }
   if (q.mode === 'shiftEq') {
-    shiftCands(q.fn, q.a, q.v).slice(0, 4).forEach(([S, t]) => out.push({ key: S.join(), text: solsText(S), sols: S, types: t, correct: !t.length }));
+    // 中ボスは「t ＝ …」、ザコは「θ ＋ π/3 ＝ …」
+    shiftCands(q.fn, q.a, q.v).slice(0, 4).forEach(([S, t]) => out.push({ key: S.join(), text: tText(p.examT ? 't' : argStr(q.a), S), sols: S, types: t, correct: !t.length }));
     return shuffle(rng, out);
   }
   if (q.mode === 'tick') {
@@ -578,7 +583,9 @@ function build(lv, kind, prm, rng, opt = {}) {
   const p = { lv, kind, prm, mode: prm.mode };
   const q = prm;
   // 窓（グラフを見せる θ の範囲）
-  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : ['signArea', 'shiftRange', 'shiftEq'].includes(q.mode) ? WIN2 : q.mode === 'tick' ? WIN_T : WIN3;
+  // ずれの 方程式は 横軸を t（a 〜 a ＋ 2π）に する
+  p.win = q.mode === 'which' ? [q.w0, q.w0 + 8] : ['signArea', 'shiftRange'].includes(q.mode) ? WIN2 : q.mode === 'shiftEq' ? [q.a / 3, q.a / 3 + 8] : q.mode === 'tick' ? WIN_T : WIN3;
+  p.examT = !!opt.boss;
   if (['which', 'pick', 'perAsk', 'tick', 'shiftWhich', 'shiftRange', 'shiftEq'].includes(q.mode)) p.options = makeOptions(p, rng);
   if (q.mode === 'tick') {
     p.fig = tickFig(q.fn, q.u); p.askKey = askKey(q, p.fig);
@@ -600,7 +607,7 @@ function build(lv, kind, prm, rng, opt = {}) {
     tick: ['▼ グラフの 目盛りを よめ', q.fn ? fnLabel(q.fn) + ' の グラフ。目盛り ？ の 値は？' : ''],
     shiftWhich: ['▼ この グラフの 式は？', '？'],
     shiftRange: ['▼ t の 範囲は？', q.a ? argStr(q.a) + ' ＝ t と おく。0 ≦ θ ＜ 2π の とき t の 範囲は？' : ''],
-    shiftEq: ['▼ グラフで 解け', q.v ? shFn(q.fn, q.a) + ' ＝ ' + q.v + '（0 ≦ θ ＜ 2π）の 解は？' : ''],
+    shiftEq: ['▼ グラフで えらべ', q.v ? shFn(q.fn, q.a) + ' ＝ ' + q.v + '（0 ≦ θ ＜ 2π）。' + argStr(q.a) + ' の 値は？' : ''],
     signArea: ['▼ 0 ≦ θ ≦ 2π で ぬれ', q.fn ? q.fn + 'θ ' + opStr(q.s) + ' 0 の ところ' : ''],
     zeros: ['▼ −π ≦ θ ≦ 2π で ぜんぶ えらべ', q.fn ? (q.what === 'asym' ? fnLabel(q.fn) + ' の 漸近線' : fnLabel(q.fn) + ' が 0 に なる θ') : ''],
   }[q.mode];
@@ -616,7 +623,7 @@ function build(lv, kind, prm, rng, opt = {}) {
       tick: ['図は 関数 ' + F + ' の グラフ である。図中の 目盛り ' + QL + ' の 値を 求めよ。'],
       shiftWhich: ['次の グラフは ' + F + ' の グラフを θ軸方向に 平行移動 した もの である。この グラフの 式を 次から 選べ。'],
       shiftRange: q.a ? ['方程式 ' + shFn(q.fn, q.a) + ' ＝ 1/2（0 ≦ θ ＜ 2π）を 解く ため、' + argStr(q.a) + ' ＝ t と おく。t の とりうる 値の 範囲を 求めよ。'] : [''],
-      shiftEq: q.v ? ['0 ≦ θ ＜ 2π の とき、方程式 ' + shFn(q.fn, q.a) + ' ＝ ' + q.v + ' を 解け。'] : [''],
+      shiftEq: q.v ? ['0 ≦ θ ＜ 2π の とき、方程式 ' + shFn(q.fn, q.a) + ' ＝ ' + q.v + ' を 解く。' + argStr(q.a) + ' ＝ t と おく とき、t の 値を すべて 求めよ。'] : [''],
       signArea: ['0 ≦ θ ≦ 2π の 範囲で、' + (q.fn || '') + 'θ ' + opStr(q.s) + ' 0 と なる θ の 範囲を グラフから 求めよ。'],
       zeros: q.what === 'asym' ? ['−π ≦ θ ≦ 2π の 範囲で、' + F + ' の グラフの 漸近線を すべて 求めよ。']
                                : ['−π ≦ θ ≦ 2π の 範囲で、' + F + ' の グラフと θ軸との 共有点の θ座標を すべて 求めよ。'],
@@ -665,13 +672,13 @@ function classify(p, ans) {
 }
 const TYPE_TEXT = {
   len: '1/2 と √3/2（ひくい・たかい）が いれかわっている',
-  noshift: 'ずれ（θ ＋ a の a）を わすれた', range: '0 ≦ θ ＜ 2π に 入らない 解が まざっている（または たりない）', amount: 'ずれの 大きさが ちがう', peak: '山（いちばん うえ）と 谷（いちばん した）を とりちがえた',
+  noshift: 'ずれ（θ ＋ a の a）を わすれた', range: 't の 範囲（a ≦ t ＜ a ＋ 2π）を ずらし わすれた／0 ≦ θ ＜ 2π に 入らない', amount: 'ずれの 大きさが ちがう', peak: '山（いちばん うえ）と 谷（いちばん した）を とりちがえた',
   swap: 'sin と cos が いれかわっている', tan: 'tan と sin・cos を とりちがえた', amp: 'たかさ（ふりはば）が ちがう',
   period: 'しゅうき（くりかえしの はば）が ちがう',
   minimal: 'くりかえしの はばでは あるけど、いちばん 小さく ない', asym: '0 に なる ところと 値が ない ところ（漸近線）を とりちがえた',
   sign: '＋ と − が はんたい', half: 'まだ ほかにも ある', scatter: 'えらびかたが ばらばら',
 };
-const MASTER_TEXT = { noshift: 'ずれを 入れる', range: 'θ の 範囲', amount: 'ずれの 大きさ', peak: '山 と 谷', len: '1/2 と √3/2', minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
+const MASTER_TEXT = { noshift: 'ずれを 入れる', range: 't の 範囲', amount: 'ずれの 大きさ', peak: '山 と 谷', len: '1/2 と √3/2', minimal: 'いちばん 小さい くりかえし', swap: 'sin と cos', tan: 'tan の かたち', amp: 'ふりはば', period: 'しゅうき', asym: '0 と 漸近線', sign: '＋ と −', half: 'ぜんぶ さがす' };
 function describe(p, cls) { return cls.types.map(t => (t === 'scatter' && p.options ? 'ちがう ものを えらんだ' : TYPE_TEXT[t])).join('、'); }
 function masterText(t) { return MASTER_TEXT[t]; }
 
@@ -697,9 +704,9 @@ function reasonLines(p, QL) {
   }
   if (q.mode === 'shiftEq') {
     const ts = solveU(q.fn, q.v, q.a, q.a + 24);
-    L.push('t ＝ ' + argStr(q.a) + ' と おくと ' + rangeText(q.a, q.a + 24) + '。この 範囲で ' + q.fn + ' t ＝ ' + q.v + ' と なる t は ' + ts.map(angStr12).join('、'));
-    L.push('θ ＝ t ' + (q.a > 0 ? MINUS + ' ' : '＋ ') + angStr12(Math.abs(q.a)) + ' → ' + solsText(shiftSols(q.fn, q.a, q.v)));
-    L.push('グラフでは y ＝ ' + q.v + ' の 横線と まじわる ところ');
+    L.push('t ＝ ' + argStr(q.a) + ' の 範囲は ' + rangeText(q.a, q.a + 24) + '（0 〜 2π では ない）');
+    L.push('この 範囲で y ＝ ' + q.fn + ' t が y ＝ ' + q.v + ' と まじわる ところ → t ＝ ' + ts.map(angStr12).join('、'));
+    L.push('（θ ＝ t ' + (q.a > 0 ? MINUS + ' ' : '＋ ') + angStr12(Math.abs(q.a)) + ' で もどすと ' + solsText(shiftSols(q.fn, q.a, q.v)) + '）');
   }
   if (q.mode === 'tick') {
     const f = p.fig, A = angStr12, ans = tickAns(q);
@@ -745,7 +752,7 @@ function likeOK(q, m, types) {
     if (t === 'half' && !['zeros', 'shiftRange', 'shiftEq'].includes(q.mode)) return false;
     if (t === 'asym' && q.fn !== 'tan') return false;
     if (t === 'sign' && q.fn !== m.fn) return false;
-    if (t === 'len' && (q.fn !== m.fn || !lenSwapV(valU(q.fn, q.u) || ''))) return false;
+    if (t === 'len' && (q.fn !== m.fn || !lenSwapV(q.mode === 'shiftEq' ? q.v : (valU(q.fn, q.u) || '')))) return false;
     if (q.mode === 'tick' && q.ask !== m.ask) return false;   // 目盛りは おなじ ききかたで
   }
   return true;
@@ -1103,8 +1110,15 @@ function drawShiftFront(ctx, v, d, q) {
   ctx.beginPath(); ctx.moveTo(0, Y); ctx.lineTo(v.W, Y); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = '#7fe8ff'; ctx.font = (11 * d) + 'px serif'; ctx.textAlign = 'left'; ctx.textBaseline = yv >= 0 ? 'bottom' : 'top';
   ctx.fillText('y ＝ ' + m.v, 6 * d, Y + (yv >= 0 ? -2 : 2) * d);
+  // 横軸は t：はしに「t」と 範囲（a 〜 a ＋ 2π）
+  ctx.fillStyle = gameEl.classList.contains('boss-final') ? '#1a1404' : gameEl.classList.contains('boss-mid') ? '#1c0610' : '#000a18';
+  ctx.fillRect(v.W - 16 * d, VY(v, 0) - 18 * d, 14 * d, 16 * d);
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = 'italic ' + (12 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+  ctx.fillText('t', v.W - 3 * d, VY(v, 0) - 2 * d);
+  ctx.fillStyle = '#7fe8ff'; ctx.font = (11 * d) + 'px serif'; ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+  ctx.fillText(C.angStr12(m.a) + ' ≦ t ＜ ' + C.angStr12(m.a + 24), v.W - 6 * d, 4 * d);
   if (!state.reveal) return;
-  C.shiftSols(m.fn, m.a, m.v).forEach(u => {
+  C.solveU(m.fn, m.v, m.a, m.a + 24).forEach(u => {
     const x = VX(v, u / 3);
     ctx.strokeStyle = YEL; ctx.lineWidth = 1.2 * d; ctx.setLineDash([3 * d, 3 * d]); ctx.beginPath(); ctx.moveTo(x, Y); ctx.lineTo(x, VY(v, 0)); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = YEL; ctx.beginPath(); ctx.arc(x, Y, 5 * d, 0, Math.PI * 2); ctx.fill();
@@ -1194,7 +1208,7 @@ function draw() {
   const showCurve = q.mode !== 'pick';
   const SH = ['shiftWhich', 'shiftRange', 'shiftEq'].includes(q.mode);
   if (SH) drawShiftBack(ctx, v, d, q);
-  if (showCurve) drawCurve(ctx, v, { fn: m.fn, ph: SH ? m.a : 0 }, d, '#fff', 2.2, !(q.mode === 'zeros' && m.what === 'asym' && vk === 'ask'));
+  if (showCurve) drawCurve(ctx, v, { fn: m.fn, ph: SH && q.mode !== 'shiftEq' ? m.a : 0 }, d, '#fff', 2.2, !(q.mode === 'zeros' && m.what === 'asym' && vk === 'ask'));
   if (SH) drawShiftFront(ctx, v, d, q);
   // 縦線（0 になる θ・漸近線）
   if (q.answer && q.answer.lines) {
