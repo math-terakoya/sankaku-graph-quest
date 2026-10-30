@@ -1145,6 +1145,9 @@ function fitRuns(root) {   // 図の 幅が 決まって から 測る（まだ 
 }
 function fitOpts() {
   keepMath($('problemExpr'));
+  { const el = $('problemExpr'); let k = 0;   // 式の 箱に 入れた あとも 入らない ときは、文字を 少しずつ 小さく（11px まで。2026-10-31：320px・文字 1.3倍で 第6章が はみ出した）
+    const over = x => x.scrollWidth > x.clientWidth + 1;
+    while ((over(el) || over($('problem')) || over($('battle'))) && k++ < 14) el.querySelectorAll('.nw').forEach(nw => { const s = parseFloat(getComputedStyle(nw).fontSize); if (s > 11) nw.style.fontSize = (s - 1) + 'px'; }); }
   const c = $('controls'), vis = optBtns.filter(b => !b.classList.contains('hidden'));
   c.classList.remove('one'); optBtns.forEach(b => { b.style.fontSize = ''; });
   if (!vis.length) return;
